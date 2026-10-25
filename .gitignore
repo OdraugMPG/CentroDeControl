@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+uploads/
+
+# Copia antigua del proyecto (reemplazada por backend/ y frontend/)
+server/
+client/
+
+# Extracciones reales del WMS: no se publican
+backend/data/muestra/
