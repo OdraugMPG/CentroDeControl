@@ -297,10 +297,32 @@ textarea.sum{min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospa
 .tree{display:grid;gap:12px}
 .tree .t{border-bottom:1px solid var(--line);padding-bottom:10px}
 .tree .sub{margin:6px 0 0 22px;display:grid;gap:4px;font-size:14px}
-.role-pick{max-width:520px;margin:60px auto;display:grid;gap:12px}
-.role-pick button{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;font-weight:600;font-size:17px}
-.role-pick button:hover{border-color:var(--ink)}
-.role-pick button span{display:block;font-weight:400;font-size:14px;color:var(--muted);margin-top:2px}
+/* Inicio de sesión y cuenta */
+.login{max-width:420px;margin:72px auto;display:grid;gap:10px}
+.login h1{font-size:30px}
+.login h2{font-size:22px;margin-top:6px}
+.login .muted{margin:0;font-size:14px}
+.login-form{display:grid;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;margin-top:4px}
+.login-form .btn{justify-content:center;padding:10px 14px}
+.cuenta{position:relative;padding:0}
+.cuenta summary{list-style:none;cursor:pointer;display:flex;gap:8px;align-items:baseline;padding:3px 12px}
+.cuenta summary::-webkit-details-marker{display:none}
+.cuenta summary span{color:var(--muted);font-size:12.5px}
+.cuenta .pop{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:220px;background:var(--panel);border:1px solid var(--ink);border-radius:6px;padding:10px;display:grid;gap:4px;justify-items:start;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.cuenta .pop button{color:var(--blue);font-size:14px}
+/* Administración */
+.adm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:end}
+.adm-form .adm-acciones{grid-column:1/-1}
+.check{display:inline-flex;gap:8px;align-items:center;font-size:14px}
+.clave-temp{border-color:var(--yellow);box-shadow:inset 4px 0 0 var(--yellow)}
+.clave-temp p{margin:6px 0}
+.clave-temp code{font-size:15px;padding:1px 6px;background:var(--bg);border-radius:4px}
+.matriz th.c,.matriz td.c{text-align:center;min-width:110px}
+.matriz th.c small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.matriz tr.grupo th,.matriz tr.grupo td{background:var(--bg);padding-top:10px;font-family:var(--display);font-size:16px;text-align:left}
+.matriz tr.grupo td.c{text-align:center;font-family:var(--body)}
+.matriz tr.grupo th{border-bottom:1px solid var(--line)}
+.matriz input[type=checkbox]{width:18px;height:18px}
 .upload{border:2px dashed var(--line);border-radius:8px;padding:16px;display:grid;gap:8px;background:var(--bg)}
 .upload.drag{border-color:var(--ink)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

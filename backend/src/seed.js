@@ -1,8 +1,9 @@
-// Datos base: turnos, calendario, etapas, metas, causas y parámetros.
+// Datos base: turnos, calendario, etapas, metas, causas, parámetros y roles de acceso.
 // Se puede ejecutar varias veces: no pisa lo que ya fue configurado.
 import { fileURLToPath } from 'node:url';
 import { pool, tx } from './db.js';
 import { migrate } from './migrate.js';
+import { ROLES_BASE } from './lib/permisos.js';
 
 export const TURNOS = [
   ['AM', 'AM', 6, 8, 1],
@@ -64,6 +65,11 @@ export async function seed() {
       await c.query('INSERT INTO causas (nombre, orden) VALUES ($1,$2) ON CONFLICT (nombre) DO NOTHING', [n, i + 1]);
     for (const [k, v] of Object.entries(PARAMETROS))
       await c.query('INSERT INTO parametros VALUES ($1,$2) ON CONFLICT (clave) DO NOTHING', [k, JSON.stringify(v)]);
+    // Roles de acceso: los editables no se pisan; Admin siempre queda con todos los permisos del catálogo
+    for (const [nombre, descripcion, permisos, sistema] of ROLES_BASE)
+      await c.query(`INSERT INTO roles (nombre, descripcion, permisos, sistema) VALUES ($1,$2,$3,$4)
+        ON CONFLICT (nombre) DO UPDATE SET permisos = CASE WHEN roles.sistema THEN EXCLUDED.permisos ELSE roles.permisos END`,
+        [nombre, descripcion, permisos, sistema]);
   });
 }
 

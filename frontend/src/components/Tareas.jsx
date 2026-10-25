@@ -2,14 +2,13 @@
 import { useApp } from '../lib/contexto.jsx';
 import { api } from '../lib/api.js';
 import { dm } from '../lib/fmt.js';
-import { esOps } from './Layout.jsx';
 
 const ST = { cerrada: 'Cerrada', abierta: 'Abierta', vencida: 'Vencida', traspasada: 'Pasó al siguiente turno' };
 
 export default function Tareas({ tareas, personas = [], onCambio, mostrarTurno = false, vacio = 'Sin actividades.' }) {
-  const { meta, usuario, avisar } = useApp();
+  const { meta, puede, avisar } = useApp();
   const cats = meta?.categorias || {};
-  const ops = esOps(usuario);
+  const ops = puede('co.asignar');
   const act = async (fn, ok) => { try { await fn(); if (ok) avisar(ok); onCambio?.(); } catch (e) { avisar(e.message, 'err'); } };
   if (!tareas.length) return <p className="empty">{vacio}</p>;
   return (

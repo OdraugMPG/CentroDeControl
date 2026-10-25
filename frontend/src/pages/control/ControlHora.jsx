@@ -6,10 +6,9 @@ import { api, qs } from '../../lib/api.js';
 import { Kpis, Card, Cargando, PageHead, SelectorTurno, useTurnoSel } from '../../components/ui.jsx';
 import Grafico from '../../components/Grafico.jsx';
 import { N, pctf, hh, hhmm, css, dmy, pctClass, pctColor, FASES } from '../../lib/fmt.js';
-import { esOps } from '../../components/Layout.jsx';
 
 export default function ControlHora() {
-  const { meta, usuario, avisar, refrescar } = useApp();
+  const { meta, puede, avisar, refrescar } = useApp();
   const { fecha, turno, set } = useTurnoSel({ permitirDia: true });
   const [sel, setSel] = useState(null);
   const [hora, setHora] = useState(null);
@@ -17,7 +16,7 @@ export default function ControlHora() {
   const area = C?.rows?.length ? (C.rows.find(r => r.area === sel) ? sel : C.rows.filter(r => r.pct !== null).sort((a, b) => a.pct - b.pct)[0]?.area || C.rows[0].area) : null;
   const ops = useCarga(() => area ? api.get('/control/operaciones?' + qs({ fecha, turno, area, hora })) : [], [fecha, turno, area, hora]);
   if (!meta) return <Cargando />;
-  const puedeEditar = esOps(usuario) && turno !== 'dia';
+  const puedeEditar = puede('da.configuracion') && turno !== 'dia';
   const umbral = meta.parametros.umbralDesvio ?? 0.85;
 
   const guardarMeta = async (a, v) => {

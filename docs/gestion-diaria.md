@@ -16,21 +16,21 @@ Los archivos de stock también se pueden cargar en **Datos → Cargas de extracc
 
 ## Quién ve qué
 
-El rol sale del usuario elegido al entrar (arriba a la derecha, «Cambiar»):
+Cada vista de Gestión diaria tiene su propio permiso. En **Administración → Roles y permisos** se marca qué roles la ven. Los roles iniciales quedan así:
 
-| Rol en el Centro de control | Vistas de Gestión diaria |
+| Rol | Vistas de Gestión diaria |
 |---|---|
-| Jefe de Operaciones | Todas: carga de la Base, asignación, tareas, conciliación, configuración y análisis |
-| Supervisor o Jefe de Turno | Mi turno y Cierre por tareas |
-| Otros (visualización) | Cierre por tareas, Slow moving, ABC / XYZ y Optimización ABC |
+| Admin y Jefe de Operaciones | Todas: carga de la Base, asignación, tareas, conciliación, configuración y análisis |
+| Supervisor | Mi turno y Cierre por tareas (y la carga de stock en Datos) |
+| Gerente | Cierre por tareas, Slow moving, ABC / XYZ y Optimización ABC |
 
-Si todavía no hay nadie registrado en **Continuidad → Equipo**, el primero que entra queda como Jefe de Operaciones, para poder configurar todo y registrar al equipo.
+Para que «Mi turno» sepa el turno de un supervisor, vincula su cuenta con su persona del Equipo en **Administración → Usuarios**.
 
 ## Prueba guiada con datos de ejemplo
 
 Los archivos de ejemplo son inventados y tienen la misma estructura de columnas del libro (3 CD: CD01, CD02 y OSR). Se descargan desde **Datos → Cargas de extracciones** o están en `backend/data/ejemplo-gestion/`.
 
-1. Entra como **Jefe de Operaciones**. En el selector **Jornada** elige un día hábil (el domingo no tiene turnos).
+1. Entra con un usuario de rol **Jefe de Operaciones** o **Admin**. En el selector **Jornada** elige un día hábil (el domingo no tiene turnos).
 2. **Gestión diaria → Configuración** → *Cargar Blq_Stk_unit* con `Blq_Stk_unit_ejemplo.xlsx`.
 3. **Asignación del día** → *Cargar Base de stock* con `Base_inicio_ejemplo.xlsx`. Los CD se crean solos y OSR queda inactivo.
 4. En **Configuración** completa por CD los supervisores T1, T2 y T3, los operarios de consolidación y si hace stock unitario (y en qué turno). *Guardar* en cada fila.
@@ -43,7 +43,7 @@ Los archivos de ejemplo son inventados y tienen la misma estructura de columnas 
    ```
    Crea `backend/data/ejemplo-gestion/Stock_cierre_T1_ejemplo.xlsx` con cerca del 85% de las tareas del T1 ejecutadas.
 8. **Conciliación** → T1 → *Cargar stock de cierre* con ese archivo (o en Datos, «Stock al cierre del turno T1»). Las tareas pasan a EJECUTADO o PARCIAL sin digitar nada.
-9. Como **Supervisor**, en **Mi turno** marca las zonas de inventario contadas y registra una tarea NO EJECUTADO con su motivo.
+9. Con un usuario **Supervisor**, en **Mi turno** marca las zonas de inventario contadas y registra una tarea NO EJECUTADO con su motivo.
 10. **Cierre por tareas** muestra el cumplimiento por tareas y por unidades, por CD y proceso, por turno y supervisor.
 
 ## Base real

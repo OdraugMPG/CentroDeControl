@@ -1,21 +1,19 @@
-// Cliente HTTP del backend. Envía el nombre del usuario actual para auditoría.
+// Cliente HTTP del backend. La sesión viaja en una cookie httpOnly (credentials: 'include').
+// Un 401 avisa a la aplicación que la sesión terminó (evento cc:sin-sesion).
 // VITE_API_URL: dirección del backend (ej. http://servidor:3000/api). Vacío = /api del mismo origen,
 // que en desarrollo Vite reenvía al backend (ver vite.config.js).
 export const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-export function usuarioActual() {
-  try { return JSON.parse(localStorage.getItem('cc-usuario') || 'null'); } catch { return null; }
-}
+export const sinSesion = () => window.dispatchEvent(new Event('cc:sin-sesion'));
 
 async function req(method, url, body, opts = {}) {
-  const u = usuarioActual();
-  const headers = {};
-  if (u?.nombre) headers['x-usuario'] = encodeURIComponent(u.nombre);
+  const headers = { 'X-CC': '1' };   // exigido por el backend en toda modificación (defensa contra CSRF)
   let payload = body;
   if (body !== undefined && !(body instanceof FormData)) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(API_URL + url, { method, headers, body: payload, cache: 'no-store', signal: opts.signal });
+  const res = await fetch(API_URL + url, { method, headers, body: payload, cache: 'no-store', credentials: 'include', signal: opts.signal });
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('application/json') ? await res.json() : await res.text();
-  if (!res.ok) throw new Error((data && data.error) || `Error ${res.status}`);
+  if (res.status === 401 && !url.startsWith('/auth/')) sinSesion();
+  if (!res.ok) throw Object.assign(new Error((data && data.error) || `Error ${res.status}`), { status: res.status, data });
   return data;
 }
 

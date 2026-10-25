@@ -6,12 +6,11 @@ import { api, qs } from '../../lib/api.js';
 import { Kpis, Card, Cargando, PageHead, SelectorTurno, useTurnoSel } from '../../components/ui.jsx';
 import Grafico from '../../components/Grafico.jsx';
 import { N, pctf, hh, hhmm, css, dmy, pctColor } from '../../lib/fmt.js';
-import { esOps } from '../../components/Layout.jsx';
 
 const estadoPill = e => e === 'Cerrado' ? 'ok' : e === 'Por cerrar' ? 'bad' : e === 'En curso' ? 'mid' : '';
 
 export default function Cierre() {
-  const { meta, usuario, avisar, refrescar } = useApp();
+  const { meta, puede, avisar, refrescar } = useApp();
   const { fecha, turno, set } = useTurnoSel();
   const [msg, setMsg] = useState(null);
   const [ocupado, setOcupado] = useState(false);
@@ -33,7 +32,7 @@ export default function Cierre() {
 
   const cuerpo = () => {
     if (!I) return <Cargando error={inf.error} />;
-    const C = I.control, locked = !!I.cierre?.cerrado_en, last = C.rows.filter(r => r.fase === 'Despacho').at(-1) || C.rows.at(-1);
+    const C = I.control, locked = !!I.cierre?.cerrado_en || !puede('op.cierre.registrar'), last = C.rows.filter(r => r.fase === 'Despacho').at(-1) || C.rows.at(-1);
     const dot = I.dotacion, ho = I.handover;
     const horas = [...new Set(I.devs.map(d => d.t))].sort((a, b) => a - b);
     const pe = I.pareto, tot = pe.reduce((s, x) => s + x.brecha, 0);
@@ -151,8 +150,8 @@ export default function Cierre() {
         <textarea className="sum" readOnly value={resumenTxt} aria-label="Resumen del cierre de turno" />
         <div className="row" style={{ marginTop: 10 }}>
           {locked
-            ? esOps(usuario) && <button type="button" className="ghost" disabled={ocupado} onClick={() => accion(() => api.post(`/cierres/${fecha}/${turno}/reabrir`), 'Turno reabierto.')}>Reabrir turno</button>
-            : <button type="button" className="btn" disabled={ocupado} onClick={() => accion(() => api.post(`/cierres/${fecha}/${turno}/cerrar`), 'Turno cerrado.')}>Cerrar turno</button>}
+            ? puede('op.cierre.reabrir') && <button type="button" className="ghost" disabled={ocupado} onClick={() => accion(() => api.post(`/cierres/${fecha}/${turno}/reabrir`), 'Turno reabierto.')}>Reabrir turno</button>
+            : puede('op.cierre.registrar') && <button type="button" className="btn" disabled={ocupado} onClick={() => accion(() => api.post(`/cierres/${fecha}/${turno}/cerrar`), 'Turno cerrado.')}>Cerrar turno</button>}
           <button type="button" className="ghost" onClick={async () => { try { await navigator.clipboard.writeText(resumenTxt); avisar('Resumen copiado.'); } catch { avisar('Selecciona el texto y cópialo manualmente.', 'err'); } }}>Copiar resumen</button>
           {msg && <span className={`msg ${msg.ok ? '' : 'err'}`} style={{ margin: 0 }} role="status">{msg.t}</span>}
         </div>

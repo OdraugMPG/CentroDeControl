@@ -17,4 +17,5 @@ export async function turno(v, { dia = false } = {}) {
 }
 
 export const texto = (v, max = 500) => v == null ? null : String(v).trim().slice(0, max) || null;
-export const usuarioDe = req => { try { return texto(decodeURIComponent(req.get('x-usuario') || ''), 120); } catch { return null; } };
+// Nombre del usuario de la sesión (queda registrado en cierres, cargas y tareas)
+export const usuarioDe = req => req.usuario?.nombre || null;

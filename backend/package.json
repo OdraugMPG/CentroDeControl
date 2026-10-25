@@ -14,7 +14,8 @@
     "db:seed": "node src/seed.js",
     "db:demo": "node src/seed-demo.js",
     "gestion:ejemplo": "node scripts/gestion-ejemplo.js",
-    "gestion:prueba-motor": "node scripts/gestion-prueba-motor.js"
+    "gestion:prueba-motor": "node scripts/gestion-prueba-motor.js",
+    "usuarios:clave": "node scripts/restablecer-clave.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

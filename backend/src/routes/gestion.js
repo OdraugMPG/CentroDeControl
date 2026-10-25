@@ -82,7 +82,7 @@ app.get('/plan', r(async (req) => {
 
 // ---- tareas
 app.get('/tareas', r(async (req) => listarTareas({ ...req.query, fecha: fechaDe(req) })));
-app.patch('/tareas/:id', r(async (req) => actualizarTarea(Number(req.params.id), req.body, req.body.quien || usuarioDe(req) || 'Supervisor')));
+app.patch('/tareas/:id', r(async (req) => actualizarTarea(Number(req.params.id), req.body, usuarioDe(req) || req.body.quien || 'Supervisor')));
 app.get('/kpi', r(async (req) => kpi({ fecha: fechaDe(req), cd: req.query.cd, turno: req.query.turno })));
 
 // ---- conciliación

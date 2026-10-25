@@ -1,19 +1,18 @@
 // Cliente de la API de Gestión Diaria. Las vistas usan rutas '/api/...' (como en el proyecto original):
-// aquí se envían a /api/gestion/... del backend del centro de control, con el usuario para auditoría.
-import { API_URL, usuarioActual } from '../../lib/api.js';
+// aquí se envían a /api/gestion/... del backend del centro de control, con la cookie de sesión.
+import { API_URL, sinSesion } from '../../lib/api.js';
 
 export const urlApi = (u) => API_URL + '/gestion' + u.replace(/^\/api/, '');
 
 async function pedir(metodo, url, cuerpo) {
-  const opt = { method: metodo, headers: {}, cache: 'no-store' };
-  const u = usuarioActual();
-  if (u?.nombre) opt.headers['x-usuario'] = encodeURIComponent(u.nombre);
+  const opt = { method: metodo, headers: { 'X-CC': '1' }, cache: 'no-store', credentials: 'include' };
   if (cuerpo instanceof FormData) opt.body = cuerpo;
   else if (cuerpo !== undefined) { opt.body = JSON.stringify(cuerpo); opt.headers['Content-Type'] = 'application/json'; }
   const r = await fetch(urlApi(url), opt);
   const t = await r.text();
   let d = null;
   try { d = t ? JSON.parse(t) : null; } catch { d = { error: t }; }
+  if (r.status === 401) sinSesion();
   if (!r.ok) throw Object.assign(new Error(d?.error || `Error ${r.status}`), { status: r.status, data: d });
   return d;
 }

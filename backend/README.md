@@ -24,6 +24,7 @@ Al arrancar, el servidor aplica las migraciones pendientes y carga los catálogo
 | `npm run db:migrate` | Aplica las migraciones de `migrations/` |
 | `npm run db:seed` | Migraciones + catálogos base |
 | `npm run db:demo` | Datos de demostración en una base vacía (`-- --borrar` para reemplazar los existentes) |
+| `npm run usuarios:clave -- <usuario> <clave>` | Recuperación: asigna una contraseña temporal, desbloquea y reactiva la cuenta |
 
 ## Variables de entorno
 
@@ -33,6 +34,7 @@ Al arrancar, el servidor aplica las migraciones pendientes y carga los catálogo
 | `DATABASE_URL` | `postgres://usuario:clave@localhost:5432/centro_control` | Conexión a PostgreSQL |
 | `TZ` | `America/Santiago` | Zona horaria de turnos y días operativos |
 | `CORS_ORIGIN` | `http://localhost:5173` | Orígenes del frontend autorizados, separados por coma |
+| `COOKIE_SECURE` | `false` | `true` cuando se publique con https (la cookie de sesión solo viaja cifrada) |
 
 ## Estructura
 
@@ -72,7 +74,16 @@ data/muestra/                  Extracción real usada en la demostración (no se
 | `/api/continuidad/*` | Personas, tareas, entregas de turno, dotación, asistencia, inventario e indicadores |
 | `/api/config/*` | Metas, calendario, causas y parámetros |
 
-El encabezado `x-usuario` (nombre codificado con `encodeURIComponent`) queda registrado en cierres, cargas y tareas.
+Toda la API exige sesión, salvo `GET /api/salud` y las rutas de inicio de sesión (`/api/auth/*`). El nombre del usuario de la sesión queda registrado en cierres, cargas y tareas.
+
+| Ruta | Descripción |
+|---|---|
+| `GET /api/auth/estado` | `{configurado}`: si aún no hay cuentas, el frontend ofrece crear el primer administrador |
+| `POST /api/auth/primer-admin` | Crea el primer administrador (solo mientras no exista ninguna cuenta) |
+| `POST /api/auth/login`, `/logout` | Abre o cierra la sesión (cookie `cc_sesion`) |
+| `GET /api/auth/yo` | Usuario, rol, permisos y persona del Equipo vinculada |
+| `POST /api/auth/clave` | Cambia la propia contraseña |
+| `/api/admin/*` | Usuarios, roles y catálogo de permisos (permiso `ad.usuarios`) |
 
 ## Reglas de negocio
 
@@ -88,4 +99,12 @@ El encabezado `x-usuario` (nombre codificado con `encodeURIComponent`) queda reg
 
 ## Seguridad
 
-No hay autenticación todavía: antes de exponer la API fuera de la red interna, agrega inicio de sesión y limita `CORS_ORIGIN` a los dominios reales.
+**Inicio de sesión.** Cada persona entra con usuario y contraseña. Las contraseñas se guardan con scrypt (nunca en claro) y deben tener al menos 8 caracteres. La sesión es un token aleatorio en una cookie `httpOnly` y `SameSite=Lax` (en la base solo se guarda su hash). Dura 12 horas y se renueva mientras se use. Cinco contraseñas erradas bloquean la cuenta 15 minutos. El administrador entrega contraseñas temporales, que se deben cambiar al entrar. Al desactivar una cuenta o restablecer su contraseña, se cierran sus sesiones.
+
+**Roles y permisos.** Los permisos son uno por vista, más algunas acciones sensibles (registrar o reabrir el cierre de turno). Su catálogo está en `src/lib/permisos.js`, junto con los roles iniciales: Admin, Jefe de Operaciones, Supervisor y Gerente. Los roles se editan en Administración, Roles y permisos. Admin tiene siempre todo y no se puede borrar, y debe quedar al menos un administrador activo. El servidor aplica los permisos: las lecturas exigen sesión, y cada modificación exige el permiso de su vista según `REGLAS` en `src/lib/permisos.js`. Una modificación sin regla se rechaza, así que **al agregar una ruta que modifica datos, agrega su regla**.
+
+**CSRF.** Toda modificación debe traer el encabezado `X-CC: 1`, que el frontend envía siempre. Otro sitio no puede agregarlo sin pasar el control de CORS.
+
+**Persona del Equipo.** Una cuenta puede vincularse a una persona de Continuidad, Equipo: de ahí salen su turno y su función (Jefe de Turno o Supervisor) en «Mi turno». El vínculo no tiene clave foránea, para que `npm run db:demo` no borre las cuentas.
+
+Antes de exponer la aplicación fuera de la red interna: publícala con https, define `COOKIE_SECURE=true` y limita `CORS_ORIGIN` a los dominios reales.

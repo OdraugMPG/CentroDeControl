@@ -8,9 +8,13 @@ import continuidad from './routes/continuidad.js';
 import config from './routes/config.js';
 import olas from './routes/olas.js';
 import gestion from './routes/gestion.js';
+import auth from './routes/auth.js';
+import admin from './routes/admin.js';
+import { proteger } from './lib/auth.js';
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 'loopback');   // detrás de Nginx/IIS en el mismo servidor: IP y https reales
 app.use(express.json({ limit: '5mb' }));
 
 // CORS: el frontend corre en otro origen (otra carpeta, otro puerto u otro servidor)
@@ -21,17 +25,23 @@ app.use((req, res, next) => {
     res.set('Access-Control-Allow-Origin', o);
     res.set('Vary', 'Origin');
     res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, x-usuario');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, X-CC');
+    res.set('Access-Control-Allow-Credentials', 'true');
     res.set('Access-Control-Expose-Headers', 'Content-Disposition');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
+// Toda la API exige sesión (salvo salud e inicio de sesión) y cada modificación, el permiso de su vista
+app.use(proteger());
+
 app.get('/api/salud', async (req, res) => {
   await pool.query('SELECT 1');
   res.json({ ok: true, hora: new Date().toISOString(), zona: process.env.TZ });
 });
+app.use('/api/auth', auth);
+app.use('/api/admin', admin);
 app.use('/api', ops);
 app.use('/api/continuidad', continuidad);
 app.use('/api/config', config);

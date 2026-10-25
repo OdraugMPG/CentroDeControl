@@ -23,6 +23,8 @@ import Indicadores from './pages/continuidad/Indicadores.jsx';
 import Cargas from './pages/config/Cargas.jsx';
 import Configuracion from './pages/config/Configuracion.jsx';
 import Gestion from './pages/gestion/Gestion.jsx';
+import Usuarios from './pages/admin/Usuarios.jsx';
+import Roles from './pages/admin/Roles.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -49,6 +51,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="gestion/:vista?" element={<Gestion />} />
             <Route path="cargas" element={<Cargas />} />
             <Route path="configuracion" element={<Configuracion />} />
+            <Route path="admin/usuarios" element={<Usuarios />} />
+            <Route path="admin/roles" element={<Roles />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

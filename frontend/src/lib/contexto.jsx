@@ -1,6 +1,7 @@
-// Estado compartido: catálogos (meta), foto en vivo (snapshot cada 5 min), usuario y avisos.
+// Estado compartido: sesión y permisos, catálogos (meta), foto en vivo (snapshot cada 5 min) y avisos.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, usuarioActual } from './api.js';
+import { api } from './api.js';
+import { puede as puedeU } from './permisos.js';
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -12,7 +13,8 @@ export function AppProvider({ children }) {
   const [error, setError] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [proxima, setProxima] = useState(Date.now() + REFRESCO_MS);
-  const [usuario, setUsuarioState] = useState(usuarioActual());
+  // undefined = comprobando la sesión; null = sin sesión; objeto = usuario conectado
+  const [cuenta, setCuenta] = useState(undefined);
   const [toast, setToast] = useState(null);
   const [version, setVersion] = useState(0);    // sube cuando hay que recargar vistas
   const [filtros, setFiltros] = useState({});   // segmentadores de pedidos, se mantienen entre vistas
@@ -22,6 +24,25 @@ export function AppProvider({ children }) {
     setToast({ texto, tipo }); clearTimeout(timer.current);
     timer.current = setTimeout(() => setToast(null), tipo === 'err' ? 5000 : 2600);
   }, []);
+
+  // Usuario de la sesión. id, rol y turno son los de su persona del Equipo (Continuidad los usa); el rol de acceso va en rolAcceso.
+  const cargarCuenta = useCallback(async () => {
+    try {
+      const y = await api.get('/auth/yo');
+      setCuenta({ ...y, cuentaId: y.id, rolAcceso: y.rol, id: y.persona?.id ?? null, rol: y.persona?.rol ?? null, turno: y.persona?.turno_id ?? null });
+    } catch (e) { setCuenta(e.status === 403 && e.data?.cambiarClave ? { cambiarClave: true, permisos: [] } : null); }
+  }, []);
+  useEffect(() => { cargarCuenta(); }, [cargarCuenta]);
+  useEffect(() => {
+    const fuera = () => { setCuenta(null); setMeta(null); setSnap(null); };
+    window.addEventListener('cc:sin-sesion', fuera);
+    return () => window.removeEventListener('cc:sin-sesion', fuera);
+  }, []);
+  const salir = useCallback(async () => {
+    try { await api.post('/auth/logout'); } catch { /* la sesión ya no existe */ }
+    setCuenta(null); setMeta(null); setSnap(null);
+  }, []);
+  const activa = !!cuenta && !cuenta.cambiarClave;
 
   const refrescar = useCallback(async () => {
     setCargando(true);
@@ -33,19 +54,18 @@ export function AppProvider({ children }) {
     setProxima(Date.now() + REFRESCO_MS);
   }, []);
 
-  useEffect(() => { refrescar(); }, [refrescar]);
+  useEffect(() => { if (activa) refrescar(); }, [activa, refrescar]);
   useEffect(() => {
+    if (!activa) return;
     const id = setInterval(() => { if (Date.now() >= proxima && !document.hidden && !cargando) refrescar(); }, 1000);
     return () => clearInterval(id);
-  }, [proxima, cargando, refrescar]);
+  }, [activa, proxima, cargando, refrescar]);
 
-  const setUsuario = u => {
-    try { u ? localStorage.setItem('cc-usuario', JSON.stringify(u)) : localStorage.removeItem('cc-usuario'); } catch { /* sin almacenamiento */ }
-    setUsuarioState(u);
-  };
+  const usuario = activa ? cuenta : null;
+  const puede = useCallback((...p) => puedeU(usuario, ...p), [usuario]);
 
   return (
-    <Ctx.Provider value={{ meta, snap, error, cargando, proxima, refrescar, usuario, setUsuario, avisar, version, filtros, setFiltros }}>
+    <Ctx.Provider value={{ meta, snap, error, cargando, proxima, refrescar, cuenta, usuario, puede, cargarCuenta, salir, avisar, version, filtros, setFiltros }}>
       {children}
       {toast && <div className={`toast ${toast.tipo === 'err' ? 'err' : ''}`} role="status">{toast.texto}</div>}
     </Ctx.Provider>

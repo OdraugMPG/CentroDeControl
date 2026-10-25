@@ -36,4 +36,6 @@ npm run dev                 # http://localhost:5173
 
 Gestión diaria (plan diario, asignación, conciliación con stock, slow moving y ABC/XYZ) es un módulo más: ver `docs/gestion-diaria.md`.
 
+**Acceso.** La primera vez que se abre la aplicación pide crear la cuenta del administrador. Después, en **Administración** se crean los usuarios (con una contraseña temporal) y se define en una matriz qué vistas ve cada rol: Admin, Jefe de Operaciones, Supervisor, Gerente o los que se agreguen. Si el administrador pierde el acceso: `cd backend && npm run usuarios:clave -- <usuario> <contraseña temporal>`.
+
 Ver `backend/README.md` para la API, la base de datos y las reglas de negocio, y `frontend/README.md` para las vistas.

@@ -1,17 +1,10 @@
-// Estructura general: barra con módulos, estado de datos, usuario y subnavegación
-import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+// Estructura general: inicio de sesión, barra con módulos y vistas según los permisos del rol, estado de datos y cuenta
+import { useEffect, useRef, useState } from 'react';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApp } from '../lib/contexto.jsx';
-import { api } from '../lib/api.js';
 import { hhmm, fechaHora } from '../lib/fmt.js';
-import { vistasDe } from '../pages/gestion/Gestion.jsx';
-
-const SUB_CONTROL = [['/', 'Resumen'], ['/recepcion', 'Recepción'], ['/almacenamiento', 'Almacenamiento'], ['/pedidos', 'Flujo de pedidos'],
-  ['/control', 'Control por hora'], ['/cierre', 'Cierre de turno'], ['/mapa', 'Pedidos por región'], ['/olas', 'Simulador de olas']];
-const SUB_CONT = [['/continuidad', 'Panel', 'todos'], ['/continuidad/turno', 'Mi turno', 'todos'], ['/continuidad/calendario', 'Calendario', 'todos'],
-  ['/continuidad/asignar', 'Asignar', 'ops'], ['/continuidad/equipo', 'Equipo', 'ops'], ['/continuidad/dotacion', 'Dotación', 'ops'],
-  ['/continuidad/inventario', 'Inventario CD', 'ops'], ['/continuidad/indicadores', 'Indicadores', 'ops']];
-export const esOps = u => !u || u.rol === 'Jefe de Operaciones';
+import { MODULOS, vistaDe, vistasDe, primeraRuta } from '../lib/permisos.js';
+import { Login, CambiarClave } from './Acceso.jsx';
 
 function Reloj() {
   const { proxima } = useApp();
@@ -21,60 +14,54 @@ function Reloj() {
   return <span>Actualiza en {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>;
 }
 
-function ElegirUsuario({ onListo }) {
-  const { setUsuario } = useApp();
-  const [personas, setPersonas] = useState(null);
-  const [nombre, setNombre] = useState('');
-  useEffect(() => { api.get('/continuidad/personas').then(setPersonas).catch(() => setPersonas([])); }, []);
-  // Sin equipo registrado, quien entra primero es Jefe de Operaciones: si no, nadie podría configurar ni agregar personas
-  const sinEquipo = personas?.length === 0;
-  const elegir = u => { setUsuario(u); onListo?.(); };
+function Cuenta({ onClave }) {
+  const { usuario, salir } = useApp();
+  const ref = useRef(null);
+  useEffect(() => {
+    const f = e => { if (ref.current && !ref.current.contains(e.target)) ref.current.open = false; };
+    document.addEventListener('click', f);
+    return () => document.removeEventListener('click', f);
+  }, []);
   return (
-    <div className="role-pick">
-      <h2 style={{ fontSize: 28 }}>¿Quién eres?</h2>
-      <p className="muted" style={{ margin: 0 }}>Tu nombre queda registrado en cierres, entregas y tareas. Se recuerda en este navegador.</p>
-      {(personas || []).map(p => (
-        <button key={p.id} type="button" onClick={() => elegir({ id: p.id, nombre: p.nombre, rol: p.rol, turno: p.turno_id })}>
-          {p.nombre}<span>{p.rol}{p.turno_id ? `, turno ${p.turno_id}` : ''}</span>
-        </button>
-      ))}
-      <div className="card" style={{ marginTop: 0 }}>
-        <label className="field"><span>{sinEquipo ? 'Aún no hay equipo registrado' : 'No estoy en la lista'}</span>
-          <input type="text" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido" />
-        </label>
-        <div className="row" style={{ marginTop: 8 }}>
-          <button type="button" className="btn" disabled={!nombre.trim()} onClick={() => elegir({ nombre: nombre.trim(), rol: sinEquipo ? 'Jefe de Operaciones' : 'Visualización' })}>Entrar</button>
-          <span className="muted" style={{ fontSize: 13 }}>{sinEquipo
-            ? 'Entrarás como Jefe de Operaciones para configurar todo. Después registra al equipo en Continuidad, Equipo.'
-            : 'Entrarás en modo visualización. El Jefe de Operaciones puede agregarte en Continuidad, Equipo.'}</span>
-        </div>
+    <details className="who cuenta" ref={ref}>
+      <summary><b>{usuario.nombre}</b><span>{usuario.rolAcceso}</span></summary>
+      <div className="pop">
+        <p className="muted" style={{ margin: '0 0 6px', fontSize: 13 }}>Usuario {usuario.usuario}{usuario.persona ? `, ${usuario.rol}${usuario.turno ? ` turno ${usuario.turno}` : ''}` : ''}</p>
+        <button type="button" className="link" onClick={() => { ref.current.open = false; onClave(); }}>Cambiar contraseña</button>
+        <button type="button" className="link" onClick={salir}>Salir</button>
       </div>
-    </div>
+    </details>
   );
 }
 
 export default function Layout() {
-  const { snap, error, cargando, refrescar, usuario, setUsuario } = useApp();
+  const { cuenta, usuario, snap, error, cargando, refrescar } = useApp();
   const { pathname } = useLocation();
-  const [cambiando, setCambiando] = useState(false);
-  const modulo = pathname.startsWith('/continuidad') ? 'cont' : pathname.startsWith('/gestion') ? 'gd' : pathname.startsWith('/cargas') || pathname.startsWith('/configuracion') ? 'cfg' : 'ctl';
-  const sub = modulo === 'ctl' ? SUB_CONTROL : modulo === 'gd' ? vistasDe(usuario).map(([r, t]) => [`/gestion${r ? '/' + r : ''}`, t]) : modulo === 'cont' ? SUB_CONT.filter(s => s[2] === 'todos' || esOps(usuario)) :
-    [['/cargas', 'Cargas de extracciones'], ...(esOps(usuario) ? [['/configuracion', 'Metas y calendario']] : [])];
-  const edad = snap?.corte ? (Date.now() - snap.corte) / 60000 : null;
+  const [clave, setClave] = useState(false);
+  useEffect(() => setClave(false), [pathname]);
 
-  if (!usuario || cambiando) return <div className="wrap"><ElegirUsuario onListo={() => setCambiando(false)} /></div>;
+  if (cuenta === undefined) return <div className="wrap"><p className="msg">Cargando…</p></div>;
+  if (!cuenta) return <Login />;
+  if (cuenta.cambiarClave) return <CambiarClave forzado />;
+
+  const actual = vistaDe(pathname);
+  const modulo = actual?.modulo || 'ctl';
+  const inicio = primeraRuta(usuario);
+  const modulos = MODULOS.map(([k, l]) => [k, l, vistasDe(usuario, k)]).filter(m => m[2].length);
+  const sub = modulos.find(m => m[0] === modulo)?.[2] || [];
+  const permitido = actual && usuario.permisos.includes(actual.vista[2]);
+  // Sin permiso para esta vista: la primera permitida del mismo módulo o, si no hay, la primera de todas
+  const destino = sub[0]?.[0] || inicio;
+  const edad = snap?.corte ? (Date.now() - snap.corte) / 60000 : null;
 
   return (
     <>
       <header className="appbar">
         <div className="in">
           <div className="brand">
-            <h1><NavLink to="/">Centro de control del CD</NavLink></h1>
+            <h1><NavLink to={inicio || '/'}>Centro de control del CD</NavLink></h1>
             <nav className="modnav" aria-label="Módulos">
-              <NavLink to="/" className={() => modulo === 'ctl' ? 'active' : ''}>Operación</NavLink>
-              <NavLink to="/gestion" className={() => modulo === 'gd' ? 'active' : ''}>Gestión diaria</NavLink>
-              <NavLink to="/continuidad" className={() => modulo === 'cont' ? 'active' : ''}>Continuidad</NavLink>
-              <NavLink to="/cargas" className={() => modulo === 'cfg' ? 'active' : ''}>Datos</NavLink>
+              {modulos.map(([k, l, vs]) => <NavLink key={k} to={vs[0][0]} className={() => modulo === k ? 'active' : ''}>{l}</NavLink>)}
             </nav>
           </div>
           <div className="live">
@@ -84,7 +71,7 @@ export default function Layout() {
             </span>
             <Reloj />
             <button type="button" className="ghost" onClick={refrescar} disabled={cargando}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
-            <span className="who"><b>{usuario.nombre}</b><button type="button" onClick={() => { setUsuario(null); setCambiando(true); }}>Cambiar</button></span>
+            <Cuenta onClave={() => setClave(true)} />
           </div>
         </div>
         <nav className="subnav" aria-label="Vistas">
@@ -93,7 +80,10 @@ export default function Layout() {
       </header>
       <main className="wrap">
         {error && <p className="msg err" role="alert">No se pudo actualizar ({error}). Se muestran los últimos datos recibidos y se reintentará en el próximo ciclo.</p>}
-        <Outlet />
+        {clave ? <CambiarClave onListo={() => setClave(false)} />
+          : permitido ? <Outlet />
+          : destino && destino !== pathname ? <Navigate to={destino} replace />
+          : <p className="msg" style={{ marginTop: 24 }}>Tu rol ({usuario.rolAcceso}) no tiene vistas asignadas. Pide al administrador que te dé permisos.</p>}
       </main>
     </>
   );
