@@ -2,6 +2,8 @@
 // Montado en /api/gestion. Las tablas están en el esquema "gestion" (ver src/gestion/db.js).
 import { Router } from 'express';
 import multer from 'multer';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { q } from '../gestion/db.js';
 import { leerParametros, guardarParametros, DEFAULTS } from '../gestion/services/parametros.js';
 import { guardarCarga } from '../gestion/services/stock.js';
@@ -45,6 +47,16 @@ app.get('/estado', r(async (req) => {
   const p = await leerParametros();
   return { fecha, cargas, asignacion: asig[0] || null, conteos: cnt, cds, reservadas: res[0].n, horarios: { 1: p.horarioT1, 2: p.horarioT2, 3: p.horarioT3 }, meta: p.meta };
 }));
+
+// ---- historial de archivos de stock (para Datos, Cargas)
+app.get('/cargas', r(async () => (await q('SELECT id, fecha, tipo, turno, archivo, filas, creado_en FROM cargas ORDER BY id DESC LIMIT 40')).rows));
+
+// ---- archivos de ejemplo (Base y ubicaciones reservadas inventadas, misma estructura del libro)
+const EJEMPLOS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data/ejemplo-gestion');
+app.get('/ejemplo/:archivo', (req, res, next) => {
+  if (!['Base_inicio_ejemplo.xlsx', 'Blq_Stk_unit_ejemplo.xlsx'].includes(req.params.archivo)) return next();
+  res.download(path.join(EJEMPLOS, req.params.archivo));
+});
 
 // ---- carga de la Base del inicio de la jornada
 app.post('/cargas/inicio', subir.single('archivo'), r(async (req) => {

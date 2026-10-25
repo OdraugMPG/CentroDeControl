@@ -49,13 +49,15 @@ export default function Gestion() {
   const [, , Vista] = v;
   const irA = k => navigate(`/gestion/${ALIAS[k] ?? k}`);
 
+  const rol = rolGd(usuario);
   return (
     <div className="gd">
+      {rol !== 'plan' && <div className="alert info">Entraste como {usuario?.rol || 'visualización'}: ves {mias.map(x => x[1]).join(', ')}. Cargar la Base de stock, generar la asignación y configurar los CD es del Jefe de Operaciones (usa «Cambiar» arriba a la derecha).</div>}
       <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
         <label className="lbl" htmlFor="gd-fecha" style={{ margin: 0 }}>Jornada</label>
         <input id="gd-fecha" type="date" value={fecha} style={{ width: 'auto' }} onChange={e => setFecha(e.target.value || hoyIso())} />
       </div>
-      <Vista fecha={fecha} rol={rolGd(usuario)} irA={irA} />
+      <Vista fecha={fecha} rol={rol} irA={irA} />
     </div>
   );
 }

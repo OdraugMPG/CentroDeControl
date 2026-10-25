@@ -23,26 +23,30 @@ function Reloj() {
 
 function ElegirUsuario({ onListo }) {
   const { setUsuario } = useApp();
-  const [personas, setPersonas] = useState([]);
+  const [personas, setPersonas] = useState(null);
   const [nombre, setNombre] = useState('');
-  useEffect(() => { api.get('/continuidad/personas').then(setPersonas).catch(() => {}); }, []);
+  useEffect(() => { api.get('/continuidad/personas').then(setPersonas).catch(() => setPersonas([])); }, []);
+  // Sin equipo registrado, quien entra primero es Jefe de Operaciones: si no, nadie podría configurar ni agregar personas
+  const sinEquipo = personas?.length === 0;
   const elegir = u => { setUsuario(u); onListo?.(); };
   return (
     <div className="role-pick">
       <h2 style={{ fontSize: 28 }}>¿Quién eres?</h2>
       <p className="muted" style={{ margin: 0 }}>Tu nombre queda registrado en cierres, entregas y tareas. Se recuerda en este navegador.</p>
-      {personas.map(p => (
+      {(personas || []).map(p => (
         <button key={p.id} type="button" onClick={() => elegir({ id: p.id, nombre: p.nombre, rol: p.rol, turno: p.turno_id })}>
           {p.nombre}<span>{p.rol}{p.turno_id ? `, turno ${p.turno_id}` : ''}</span>
         </button>
       ))}
       <div className="card" style={{ marginTop: 0 }}>
-        <label className="field"><span>No estoy en la lista</span>
+        <label className="field"><span>{sinEquipo ? 'Aún no hay equipo registrado' : 'No estoy en la lista'}</span>
           <input type="text" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido" />
         </label>
         <div className="row" style={{ marginTop: 8 }}>
-          <button type="button" className="btn" disabled={!nombre.trim()} onClick={() => elegir({ nombre: nombre.trim(), rol: 'Visualización' })}>Entrar</button>
-          <span className="muted" style={{ fontSize: 13 }}>El Jefe de Operaciones puede agregarte en Continuidad, Equipo.</span>
+          <button type="button" className="btn" disabled={!nombre.trim()} onClick={() => elegir({ nombre: nombre.trim(), rol: sinEquipo ? 'Jefe de Operaciones' : 'Visualización' })}>Entrar</button>
+          <span className="muted" style={{ fontSize: 13 }}>{sinEquipo
+            ? 'Entrarás como Jefe de Operaciones para configurar todo. Después registra al equipo en Continuidad, Equipo.'
+            : 'Entrarás en modo visualización. El Jefe de Operaciones puede agregarte en Continuidad, Equipo.'}</span>
         </div>
       </div>
     </div>

@@ -9,3 +9,6 @@ client/
 
 # Extracciones reales del WMS: no se publican
 backend/data/muestra/
+
+# Stock de cierre simulado con npm run gestion:ejemplo -- cierre ...
+backend/data/ejemplo-gestion/Stock_cierre_*

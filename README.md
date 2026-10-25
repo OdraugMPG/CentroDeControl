@@ -34,4 +34,6 @@ npm run dev                 # http://localhost:5173
   1. **Mismo dominio**: publica `frontend/dist` y haz que tu servidor web (Nginx, IIS) envíe `/api` al backend. `VITE_API_URL` queda vacío.
   2. **Dominios distintos**: define `VITE_API_URL=https://api.tu-dominio.cl/api` antes de `npm run build`, y en el backend `CORS_ORIGIN=https://tu-dominio.cl`.
 
+Gestión diaria (plan diario, asignación, conciliación con stock, slow moving y ABC/XYZ) es un módulo más: ver `docs/gestion-diaria.md`.
+
 Ver `backend/README.md` para la API, la base de datos y las reglas de negocio, y `frontend/README.md` para las vistas.

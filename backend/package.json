@@ -12,7 +12,9 @@
     "start": "node src/index.js",
     "db:migrate": "node src/migrate.js",
     "db:seed": "node src/seed.js",
-    "db:demo": "node src/seed-demo.js"
+    "db:demo": "node src/seed-demo.js",
+    "gestion:ejemplo": "node scripts/gestion-ejemplo.js",
+    "gestion:prueba-motor": "node scripts/gestion-prueba-motor.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
