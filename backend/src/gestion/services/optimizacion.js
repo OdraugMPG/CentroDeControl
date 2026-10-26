@@ -7,6 +7,7 @@ import { clasificacionActual } from './abcXyz.js';
 import { TODOS } from '../engine/abcXyz.js';
 import { up, cmp } from '../engine/util.js';
 import { esAptoOsr } from '../engine/base.js';
+import { libro } from './tareas.js';
 
 // SKU de alta rotación que conviene tener en el CD prioritario
 export const CLASES_TRAER = ['AX', 'AY', 'BX'];
@@ -248,4 +249,160 @@ export async function generarIngresoOsr(params = {}) {
     }
   });
   return { tareas: n, skus: sel.length, destino };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Consolidación entre CD: SKU con stock repartido en varios CD y simulación para dejarlos en uno solo.
+// Regla OSR: el stock que está en OSR se mantiene, pero el SKU debe tener stock de seguridad fuera de OSR
+// (N días de venta) en un único CD de respaldo; si no lo tiene, se propone extraer la diferencia desde OSR.
+// ---------------------------------------------------------------------------------------------
+export const CRITERIOS_CONS = { unidades: 'CD con más unidades (menos movimiento)', prioritario: 'Alta rotación al CD prioritario; el resto al CD con más unidades' };
+const MAX_EXTRAER_OSR = 0.5;
+export const ESTADOS_CONS = { CONSOLIDAR: 'Consolidar', CONS_OSR: 'Consolidar fuera de OSR', SIN_SS: 'Sin stock de seguridad fuera de OSR', SS_BAJO: 'Stock de seguridad insuficiente' };
+
+async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7 } = {}) {
+  const { carga, p, filas, clase } = await datos();
+  const osr = up(p.cdOsr), cdPri = up(p.cdPrioritario);
+  const D = Math.max(0, Number(diasSS) || 0);
+  const crit = criterio in CRITERIOS_CONS ? criterio : 'unidades';
+  const cds = [...new Set(filas.map((r) => r.cd))].sort(cmp);
+  const sk = new Map(), skuEnUb = new Map();
+  for (const r of filas) {
+    let x = sk.get(r.sku);
+    if (!x) {
+      const c = clase.get(r.sku);
+      x = { sku: r.sku, desc: r.desc, depto: r.depto, matriz: c?.matriz || 'CZ', abc: c?.abc || 'C', ventaDia: (c?.ventas || 0) / DIAS_VENTAS, porCd: new Map() };
+      sk.set(r.sku, x);
+    }
+    let e = x.porCd.get(r.cd);
+    if (!e) x.porCd.set(r.cd, (e = { cd: r.cd, uni: 0, ubic: new Map() }));
+    e.uni += r.qty;
+    if (!e.ubic.has(r.ubic)) e.ubic.set(r.ubic, { ubic: r.ubic, piso: r.piso, zp: r.zp, qty: 0 });
+    e.ubic.get(r.ubic).qty += r.qty;
+    const ku = r.cd + '|' + r.ubic;
+    if (!skuEnUb.has(ku)) skuEnUb.set(ku, new Set());
+    skuEnUb.get(ku).add(r.sku);
+  }
+
+  const lista = [], movs = [];
+  const tot = { skus: sk.size, unCd: 0, dispersos: 0, enOsr: 0 };
+  for (const x of sk.values()) {
+    const enOsr = x.porCd.get(osr)?.uni || 0;
+    const fuera = [...x.porCd.values()].filter((e) => e.cd !== osr);
+    if (x.porCd.size === 1) tot.unCd++; else tot.dispersos++;
+    if (enOsr) tot.enOsr++;
+    const ss = Math.ceil(x.ventaDia * D);
+    const fueraUni = fuera.reduce((s, e) => s + e.uni, 0);
+    const faltaSS = enOsr ? Math.max(0, ss - fueraUni) : 0;
+    if (fuera.length < 2 && !faltaSS) continue;
+
+    // CD destino (siempre fuera de OSR): el de más unidades, o el prioritario para la alta rotación
+    fuera.sort((a, b) => b.uni - a.uni || b.ubic.size - a.ubic.size || (b.cd === cdPri) - (a.cd === cdPri) || cmp(a.cd, b.cd));
+    let destino = fuera[0]?.cd || cdPri;
+    if (crit === 'prioritario' && CLASES_TRAER.includes(x.matriz) && cds.includes(cdPri)) destino = cdPri;
+    const r = { sku: x.sku, desc: x.desc, depto: x.depto, matriz: x.matriz, abc: x.abc, ventaDia: x.ventaDia,
+      unidades: Object.fromEntries([...x.porCd.values()].map((e) => [e.cd, e.uni])), nCds: x.porCd.size,
+      total: [...x.porCd.values()].reduce((s, e) => s + e.uni, 0), nUb: [...x.porCd.values()].reduce((s, e) => s + e.ubic.size, 0),
+      osr: enOsr, destino, uniMover: 0, ubMover: 0, ubLibera: 0, ss: enOsr ? ss : null, extraerOsr: 0 };
+
+    for (const e of fuera) {
+      if (e.cd === destino) continue;
+      for (const u of e.ubic.values()) {
+        const libera = skuEnUb.get(e.cd + '|' + u.ubic).size === 1;
+        movs.push({ sku: x.sku, desc: x.desc, matriz: x.matriz, cdOrigen: e.cd, ubic: u.ubic, piso: u.piso, zp: u.zp, qty: u.qty, cdDestino: destino, motivo: 'Consolidación', libera });
+        r.uniMover += u.qty; r.ubMover++;
+        if (libera) r.ubLibera++;
+      }
+    }
+    // stock de seguridad fuera de OSR: lo que falta se extrae desde las ubicaciones de OSR con más unidades,
+    // como máximo la mitad del stock de OSR para no vaciar el automático
+    let resta = Math.min(faltaSS, Math.floor(enOsr * MAX_EXTRAER_OSR));
+    for (const u of resta ? [...x.porCd.get(osr).ubic.values()].sort((a, b) => b.qty - a.qty || cmp(a.ubic, b.ubic)) : []) {
+      if (resta <= 0) break;
+      const t = Math.min(u.qty, resta);
+      movs.push({ sku: x.sku, desc: x.desc, matriz: x.matriz, cdOrigen: osr, ubic: u.ubic, piso: u.piso, zp: u.zp, qty: t, cdDestino: destino, motivo: 'Stock de seguridad fuera de OSR', libera: false });
+      r.extraerOsr += t; r.ubMover++;
+      resta -= t;
+    }
+    r.ssDespues = enOsr ? fueraUni + r.extraerOsr : null;
+    r.osrDespues = enOsr - r.extraerOsr;
+    r.cubreSS = enOsr ? r.ssDespues >= ss : null;
+    r.estado = !enOsr ? ESTADOS_CONS.CONSOLIDAR : !fueraUni ? ESTADOS_CONS.SIN_SS : faltaSS ? ESTADOS_CONS.SS_BAJO : ESTADOS_CONS.CONS_OSR;
+    r.cdsDespues = [destino, ...(r.osrDespues > 0 ? [osr] : [])];
+    lista.push(r);
+  }
+  // primero lo que más vende (clase A), después lo que más ubicaciones libera
+  lista.sort((a, b) => cmp(a.abc, b.abc) || b.ventaDia - a.ventaDia || b.ubLibera - a.ubLibera || cmp(a.sku, b.sku));
+  const orden = new Map(lista.map((r, i) => [r.sku, i]));
+  movs.sort((a, b) => orden.get(a.sku) - orden.get(b.sku));
+
+  // balance por CD: SKU antes / después, unidades que salen / entran y ubicaciones que se liberan
+  const bal = new Map(cds.map((cd) => [cd, { cd, skusAntes: 0, skusDespues: 0, sale: 0, entra: 0, ubLibera: 0 }]));
+  const despues = new Map([...sk.values()].map((x) => [x.sku, [...x.porCd.keys()]]));
+  for (const x of sk.values()) for (const cd of x.porCd.keys()) bal.get(cd).skusAntes++;
+  for (const r of lista) despues.set(r.sku, r.cdsDespues);
+  for (const l of despues.values()) for (const cd of l) if (bal.has(cd)) bal.get(cd).skusDespues++;
+  for (const m of movs) {
+    const o = bal.get(m.cdOrigen);
+    o.sale += m.qty;
+    if (m.libera) o.ubLibera++;
+    if (bal.has(m.cdDestino)) bal.get(m.cdDestino).entra += m.qty;
+  }
+
+  const porEstado = Object.values(ESTADOS_CONS).map((estado) => {
+    const l = lista.filter((r) => r.estado === estado);
+    return { estado, skus: l.length, uni: l.reduce((s, r) => s + r.uniMover + r.extraerOsr, 0) };
+  });
+  const sum = (k) => lista.reduce((s, r) => s + r[k], 0);
+  return {
+    carga, osr, cdPri, cds, criterio: crit, criterios: CRITERIOS_CONS, diasSS: D, tot, porEstado, lista, movs,
+    resumen: { skus: lista.length, uniMover: sum('uniMover'), extraerOsr: sum('extraerOsr'), ubMover: sum('ubMover'), ubLibera: sum('ubLibera'),
+      noCubreSS: lista.filter((r) => r.cubreSS === false).length },
+    balance: [...bal.values()],
+  };
+}
+
+/** Simulación para la vista: totales, balance por CD y los primeros 500 SKU (filtrables por estado y clase). */
+export async function consolidacionCds(params = {}) {
+  const { lista, movs, ...r } = await calcularConsolidacionCds(params);
+  const est = params.estado || '', abc = up(params.abc);
+  const sel = lista.filter((x) => (!est || x.estado === est) && (!abc || x.abc === abc));
+  return { ...r, filtrados: sel.length, detalle: sel.slice(0, 500), movimientos: movs.length };
+}
+
+/** Reporte .xlsx con todos los SKU con acción, los movimientos sugeridos y el balance por CD. */
+export async function archivoConsolidacionCds(params = {}) {
+  const d = await calcularConsolidacionCds(params);
+  const fecha = d.carga.fecha instanceof Date ? d.carga.fecha.toISOString().slice(0, 10) : String(d.carga.fecha).slice(0, 10);
+  const resumen = [
+    ['Consolidación de SKU entre CD (simulación)'],
+    ['Base de stock', fecha],
+    ['Criterio del CD destino', d.criterios[d.criterio]],
+    ['CD del OSR', d.osr],
+    ['Stock de seguridad fuera de OSR', `${d.diasSS} días de venta (venta diaria = ventas 2 meses / ${DIAS_VENTAS}); de OSR se extrae como máximo el ${MAX_EXTRAER_OSR * 100}% de su stock`],
+    [],
+    ['SKU con stock', d.tot.skus], ['SKU en un solo CD', d.tot.unCd], ['SKU en 2 o más CD', d.tot.dispersos], ['SKU con stock en OSR', d.tot.enOsr],
+    [],
+    ['SKU con acción', d.resumen.skus], ['Unidades a mover (consolidación)', d.resumen.uniMover], ['Unidades a extraer de OSR (stock de seguridad)', d.resumen.extraerOsr],
+    ['Ubicaciones de origen (tareas)', d.resumen.ubMover], ['Ubicaciones que quedan libres', d.resumen.ubLibera],
+    ['SKU de OSR que no alcanzan el stock de seguridad fuera', d.resumen.noCubreSS],
+    [],
+    ['Estado', 'SKU', 'Unidades a mover'], ...d.porEstado.map((e) => [e.estado, e.skus, e.uni]),
+  ];
+  const porSku = [['SKU', 'Descripción', 'Depto', 'Clase', 'Venta/día', 'N° CD', ...d.cds.map((cd) => `Unid. ${cd}`), 'Total unidades', 'Ubicaciones',
+    'CD destino', 'Unid. a mover', 'Ubic. a mover', 'Ubic. que se liberan', `Stock seg. requerido (${d.diasSS} d)`, 'Unid. a extraer de OSR',
+    'Stock fuera de OSR después', 'Stock OSR después', 'Cubre stock seg.', 'CD después', 'Estado'],
+  ...d.lista.map((r) => [r.sku, r.desc, r.depto, r.matriz, Math.round(r.ventaDia * 100) / 100, r.nCds, ...d.cds.map((cd) => r.unidades[cd] || 0), r.total, r.nUb,
+    r.destino, r.uniMover, r.ubMover, r.ubLibera, r.ss ?? '', r.extraerOsr, r.ssDespues ?? '', r.osr ? r.osrDespues : '',
+    r.cubreSS === null ? '' : r.cubreSS ? 'Sí' : 'No', r.cdsDespues.join(' + '), r.estado])];
+  const movs = [['SKU', 'Descripción', 'Clase', 'CD origen', 'Piso', 'Zona pasillo', 'Ubicación origen', 'Unidades', 'CD destino', 'Motivo', 'Libera ubicación'],
+    ...d.movs.map((m) => [m.sku, m.desc, m.matriz, m.cdOrigen, m.piso, m.zp, m.ubic, m.qty, m.cdDestino, m.motivo, m.libera ? 'Sí' : 'No'])];
+  const bal = [['CD', 'SKU antes', 'SKU después', 'Unidades que salen', 'Unidades que entran', 'Ubicaciones que se liberan'],
+    ...d.balance.map((b) => [b.cd, b.skusAntes, b.skusDespues, b.sale, b.entra, b.ubLibera])];
+  return {
+    buffer: libro([['Resumen', resumen, [46, 60, 16]],
+      ['Por SKU', porSku, [16, 36, 18, 7, 10, 6, ...d.cds.map(() => 11), 12, 11, 10, 12, 11, 14, 16, 16, 16, 14, 12, 14, 34]],
+      ['Movimientos', movs, [16, 36, 7, 10, 8, 12, 18, 10, 10, 30, 10]], ['Balance por CD', bal, [10, 11, 12, 18, 18, 24]]]),
+    nombre: `Consolidacion_CD_${fecha}.xlsx`,
+  };
 }

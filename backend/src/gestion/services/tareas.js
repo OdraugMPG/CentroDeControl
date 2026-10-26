@@ -130,14 +130,14 @@ export async function kpi({ fecha, cd, turno }) {
 }
 
 // ---------------- archivos .xlsx ----------------
-const libro = (hojas) => {
+export const libro = (hojas) => {
   const wb = XLSX.utils.book_new();
   for (const [nombre, aoa, anchos] of hojas) {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     if (anchos) ws['!cols'] = anchos.map((w) => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, ws, nombre);
   }
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true });
 };
 
 /** Archivo del turno para el supervisor (misma estructura que ExportarTurno del libro). */

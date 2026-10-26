@@ -11,7 +11,7 @@ import { generarAsignacion } from '../gestion/services/asignacion.js';
 import { listarTareas, actualizarTarea, cierreConStock, kpi, archivoTurno, archivoWms, importarAvances } from '../gestion/services/tareas.js';
 import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow } from '../gestion/services/slow.js';
 import { abcXyz, guardarAbcXyz, cargarHistoria, borrarHistoria } from '../gestion/services/abcXyz.js';
-import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr } from '../gestion/services/optimizacion.js';
+import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds } from '../gestion/services/optimizacion.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
@@ -118,6 +118,8 @@ app.delete('/abcxyz/historia', r(() => borrarHistoria()));
 app.get('/optimizacion', r(() => optimizacion()));
 app.post('/optimizacion/osr/simular', r((req) => simularOsr(req.body || {})));
 app.post('/optimizacion/osr/generar', r((req) => generarIngresoOsr(req.body || {})));
+app.post('/optimizacion/consolidacion/simular', r((req) => consolidacionCds(req.body || {})));
+app.get('/optimizacion/consolidacion/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionCds(req.query))));
 app.post('/optimizacion/reasignar', r((req) => generarReasignacion(req.body?.tipo === 'traer' ? 'traer' : 'liberar', req.body?.limite)));
 
 // ---- configuración

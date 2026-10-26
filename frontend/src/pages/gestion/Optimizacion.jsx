@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api, fmt, fFecha } from './api.js';
+import { api, qs, urlApi, fmt, fFecha } from './api.js';
 import { toast, useCarga } from './ui.jsx';
 
 const pc = (a, b, d = 1) => (b > 0 ? fmt((100 * a) / b, d) + '%' : '—');
@@ -142,6 +142,87 @@ function IngresoOsr({ onCola }) {
   );
 }
 
+const TONO_ESTADO = { 'Consolidar': '', 'Consolidar fuera de OSR': 'm-1', 'Sin stock de seguridad fuera de OSR': 'm-4', 'Stock de seguridad insuficiente': 'm-3' };
+
+/** SKU repartidos en varios CD: simulación para dejarlos en un solo CD, con stock de seguridad fuera de OSR. */
+function ConsolidacionCds() {
+  const [f, setF] = useState({ criterio: 'unidades', diasSS: 7, estado: '', abc: '' });
+  const [r, setR] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  React.useEffect(() => {
+    setCargando(true);
+    const t = setTimeout(() => api.post('/api/optimizacion/consolidacion/simular', f).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
+    return () => clearTimeout(t);
+  }, [JSON.stringify(f)]);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const alt = (k, v) => set(k)(f[k] === v ? '' : v);
+  const osr = r?.osr || 'OSR';
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>Consolidación de SKU entre CD</h2>
+        <a className="btn primary" href={urlApi('/api/optimizacion/consolidacion/excel' + qs({ criterio: f.criterio, diasSS: f.diasSS }))}>Exportar a Excel</a>
+      </div>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más CD y simulación para dejarlos en un solo CD. El stock en {osr} se mantiene, pero cada SKU de {osr} debe tener stock de seguridad fuera de {osr} (días de venta) en un único CD; si no lo tiene, se propone extraer la diferencia desde {osr} (como máximo la mitad de su stock, para no vaciar el automático). El Excel trae todos los SKU, los movimientos por ubicación y el balance por CD.</p>
+      <div className="row" style={{ margin: '10px 0 14px' }}>
+        <div><label className="lbl" htmlFor="c-cr">CD destino</label>
+          <select id="c-cr" value={f.criterio} onChange={(e) => set('criterio')(e.target.value)}>
+            {Object.entries(r?.criterios || { unidades: 'CD con más unidades (menos movimiento)' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select></div>
+        <div><label className="lbl" htmlFor="c-ss">Stock de seguridad fuera de {osr} (días)</label><input id="c-ss" type="number" className="w90" min="0" value={f.diasSS} onChange={(e) => set('diasSS')(e.target.value)} /></div>
+        {cargando && <span className="note">Simulando…</span>}
+      </div>
+      {r && (
+        <>
+          <div className="grid-kpi">
+            <div className="kpi"><div className="k">SKU en 2 o más CD</div><div className="v">{fmt(r.tot.dispersos)}</div><div className="n">de {fmt(r.tot.skus)} SKU con stock · {fmt(r.tot.unCd)} ya en un solo CD</div></div>
+            <div className="kpi good"><div className="k">A consolidar</div><div className="v">{fmt(r.resumen.uniMover)} u.</div><div className="n">{fmt(r.resumen.skus)} SKU · {fmt(r.resumen.ubMover)} ubicaciones de origen</div></div>
+            <div className="kpi good"><div className="k">Ubicaciones que se liberan</div><div className="v">{fmt(r.resumen.ubLibera)}</div><div className="n">quedan vacías al sacar el SKU</div></div>
+            <div className={'kpi ' + (r.resumen.extraerOsr ? 'warn' : '')}><div className="k">Stock de seguridad desde {osr}</div><div className="v">{fmt(r.resumen.extraerOsr)} u.</div><div className="n">a mover al CD de respaldo · {fmt(r.resumen.noCubreSS)} SKU de {osr} siguen sin cubrir {r.diasSS} días fuera (falta reposición)</div></div>
+          </div>
+          <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)' }}>
+            <table>
+              <thead><tr><th>CD</th><th className="num">SKU antes</th><th className="num">SKU después</th><th className="num">Unid. salen</th><th className="num">Unid. entran</th><th className="num">Ubic. liberadas</th></tr></thead>
+              <tbody>{r.balance.map((b) => (
+                <tr key={b.cd}><td><b>{b.cd}</b>{b.cd === r.osr && <span className="tag" style={{ marginLeft: 6 }}>OSR</span>}{b.cd === r.cdPri && <span className="tag" style={{ marginLeft: 6 }}>prioritario</span>}</td>
+                  <td className="num">{fmt(b.skusAntes)}</td><td className="num">{fmt(b.skusDespues)}</td><td className="num">{fmt(b.sale)}</td><td className="num">{fmt(b.entra)}</td><td className="num">{fmt(b.ubLibera)}</td></tr>
+              ))}</tbody>
+            </table>
+            <table>
+              <thead><tr><th>Estado</th><th className="num">SKU</th><th className="num">Unid. a mover</th></tr></thead>
+              <tbody>{r.porEstado.map((e) => (
+                <tr key={e.estado}><td><span className={'pill ' + TONO_ESTADO[e.estado]}>{e.estado}</span></td><td className="num">{fmt(e.skus)}</td><td className="num">{fmt(e.uni)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div className="row spread" style={{ margin: '14px 0 8px' }}>
+            <div className="chips">
+              {r.porEstado.filter((e) => e.skus).map((e) => <button key={e.estado} className="chip" aria-pressed={f.estado === e.estado} onClick={() => alt('estado', e.estado)}>{e.estado} · {fmt(e.skus)}</button>)}
+            </div>
+            <div className="chips">{['A', 'B', 'C'].map((a) => <button key={a} className="chip" aria-pressed={f.abc === a} onClick={() => alt('abc', a)}>Clase {a}</button>)}</div>
+          </div>
+          <div className="tbl" style={{ maxHeight: 420 }}>
+            <table>
+              <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th><th>Unidades por CD hoy</th><th className="num">Total</th><th>CD destino</th><th className="num">Mover</th><th className="num">Libera</th><th className="num">SS req.</th><th className="num">Extraer de {osr}</th><th className="num">Fuera de {osr} después</th><th>Estado</th></tr></thead>
+              <tbody>{r.detalle.map((x) => (
+                <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td>
+                  <td className="num">{fmt(x.ventaDia, 1)}</td>
+                  <td className="desde">{Object.entries(x.unidades).map(([cd, u]) => <div key={cd}><span className={cd === x.destino ? '' : 'muted'}>{cd}</span> <b>{fmt(u)}</b></div>)}</td>
+                  <td className="num">{fmt(x.total)}</td><td><b>{x.destino}</b>{x.osrDespues > 0 && <span className="muted"> + {osr}</span>}</td>
+                  <td className="num">{fmt(x.uniMover)}</td><td className="num">{fmt(x.ubLibera)}</td>
+                  <td className="num">{x.ss === null ? '—' : fmt(x.ss)}</td><td className="num">{x.extraerOsr ? <b>{fmt(x.extraerOsr)}</b> : '—'}</td>
+                  <td className="num" style={x.cubreSS === false ? { color: 'var(--bad)' } : undefined} title={x.cubreSS === false ? 'No alcanza el stock de seguridad' : undefined}>{x.ssDespues === null ? '—' : fmt(x.ssDespues)}</td>
+                  <td><span className={'pill ' + TONO_ESTADO[x.estado]}>{x.estado}</span></td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU (clase A primero, por venta diaria). El Excel trae todos.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Optimizacion({ irA }) {
   const [d, err, rec] = useCarga(() => api.get('/api/optimizacion'), []);
   const [ver, setVer] = useState('traer');
@@ -254,6 +335,8 @@ export default function Optimizacion({ irA }) {
       </div>
 
       <IngresoOsr onCola={rec} />
+
+      <ConsolidacionCds />
 
       <div className="viz-row">
         <div className="sec">
