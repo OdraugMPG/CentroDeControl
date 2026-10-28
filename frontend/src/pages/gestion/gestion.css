@@ -189,3 +189,9 @@
 .gd tr.sel td { background: color-mix(in srgb, var(--accent, #1f4e79) 10%, transparent); }
 .gd ul.lista-lectura{margin:4px 0 0;padding-left:18px;font-size:13.5px;line-height:1.55}
 .gd ul.lista-lectura li{margin:2px 0}
+.gd .th-ord{background:none;border:0;padding:0;margin:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.gd .th-ord .flecha{font-size:9px;opacity:.35}
+.gd .th-ord:hover .flecha{opacity:.8}
+.gd th[aria-sort=ascending] .th-ord,.gd th[aria-sort=descending] .th-ord{color:var(--accent)}
+.gd th[aria-sort=ascending] .flecha,.gd th[aria-sort=descending] .flecha{opacity:1}
+.gd th.num .th-ord{flex-direction:row-reverse}

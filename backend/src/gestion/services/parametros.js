@@ -30,7 +30,10 @@ export const DEFAULTS = {
   xyzMeses: { v: 6, n: 'XYZ por historia: meses de ventas que se analizan' },
   cdPrioritario: { v: 'CD2', n: 'CD prioritario para alta rotación (el más cercano a OSR y empaque)' },
   cdOsr: { v: 'OSR', n: 'CD del OSR (almacén automático)' },
-  cdsConsPrimero: { v: 'RCI', n: 'Consolidación entre CD: si el SKU tiene stock en este CD, se consolida ahí directamente (varios con |, en orden de prioridad)' },
+  cdsConsPrimero: { v: '', n: 'Consolidación entre CD: si el SKU tiene stock en este CD, se consolida ahí directamente (varios con |, en orden de prioridad; los CD buffer no cuentan)' },
+  cdsBuffer: { v: 'RCI', n: 'Consolidación entre CD: CD buffer de reabastecimiento (varios con |). No son destino de consolidación, su stock queda como reserva (cuenta como respaldo fuera de OSR) y se busca no pickear desde ahí' },
+  cdEtiqueta: { v: '', n: 'Consolidación entre CD: CD donde se consolida el picking de ETIQUETA (vacío = sin CD de etiqueta)' },
+  consMixtoPct: { v: 0.3, n: 'Consolidación entre CD: % de pedidos mixtos (tarea + etiqueta) desde el que un SKU de tarea también va al CD de etiqueta (0,3 = 30%)' },
   osrPct: { v: 0.8, n: 'Reabasto OSR (PCT_OSR): % de las unidades proyectadas del evento que debe despachar el OSR (0,8 = 80%; la columna % OSR de Pro_Evt lo reemplaza por depto)' },
   osrColchon: { v: 0, n: 'Reabasto OSR (COLCHON): colchón sobre la meta OSR para cubrir error de proyección (0,1 = 10%)' },
   osrOlas: { v: 1, n: 'Reabasto OSR (OLAS_REABASTO): cargas al OSR para cubrir la meta (1 = todo antes del evento; 3 = carga previa + 2 reposiciones)' },
@@ -56,7 +59,7 @@ export const DEFAULTS = {
   horarioT2: { v: '15:00-23:00', n: 'Horario turno 2' },
   horarioT3: { v: '23:00-07:00', n: 'Horario turno 3' },
 };
-const TEXTO = new Set(['porPiso', 'tramos', 'cdsExcluir', 'smDestino', 'cdPrioritario', 'cdOsr', 'cdsConsPrimero', 'deptosOsr', 'soloDeptosOsr', 'osrClasesAbc', 'osrClasesXyz', 'horarioT1', 'horarioT2', 'horarioT3']);
+const TEXTO = new Set(['porPiso', 'tramos', 'cdsExcluir', 'smDestino', 'cdPrioritario', 'cdOsr', 'cdsConsPrimero', 'cdsBuffer', 'cdEtiqueta', 'deptosOsr', 'soloDeptosOsr', 'osrClasesAbc', 'osrClasesXyz', 'horarioT1', 'horarioT2', 'horarioT3']);
 
 export async function leerParametros() {
   const { rows } = await q('SELECT clave, valor FROM parametros');

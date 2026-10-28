@@ -32,16 +32,18 @@ function Generar({ etiqueta, total, onGenerar }) {
 }
 
 const TONO_ESTADO = { 'Consolidar': '', 'Consolidar fuera de OSR': 'm-1', 'Sin stock de seguridad fuera de OSR': 'm-4', 'Stock de seguridad insuficiente': 'm-3',
-  'Consolidar en destino': 'm-0', 'Nuevo en destino': 'm-2' };
+  'Consolidar en destino': 'm-0', 'Nuevo en destino': 'm-2', 'Llevar al CD de etiqueta': 'm-1', 'Abastecer picking desde buffer': 'm-2' };
+const TIPOS_PICK = [['', 'Todos'], ['TAREA', 'Tarea'], ['ETIQUETA', 'Etiqueta'], ['MIXTO', 'Tarea y etiqueta'], ['SIN', 'Sin picking']];
 
 /** SKU repartidos en varios CD: simulación para dejarlos en un solo CD, con stock de seguridad fuera de OSR, o de una ruta Desde → Hasta. */
 function ConsolidacionCds() {
-  const [f, setF] = useState({ criterio: 'unidades', diasSS: 7, estado: '', abc: '', desde: '', hasta: '', soloEnDestino: true });
+  const [f, setF] = useState({ criterio: 'unidades', diasSS: 7, estado: '', abc: '', desde: '', hasta: '', soloEnDestino: true, tipo: '', cdEtiqueta: null, mixtoPct: '', depto: '', orden: '', dir: 'desc', top: '' });
+  const [vista, setVista] = useState('sku');
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
   // la ruta se simula solo con los dos CD elegidos; mientras falte uno, sigue la consolidación general
   const enRuta = !!(f.desde && f.hasta && f.desde !== f.hasta);
-  const cuerpo = { ...f, desde: enRuta ? f.desde : '', hasta: enRuta ? f.hasta : '' };
+  const cuerpo = { ...f, desde: enRuta ? f.desde : '', hasta: enRuta ? f.hasta : '', mixtoPct: f.mixtoPct === '' ? '' : Number(f.mixtoPct) / 100 };
   React.useEffect(() => {
     setCargando(true);
     const t = setTimeout(() => api.post('/api/optimizacion/consolidacion/simular', cuerpo).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
@@ -53,13 +55,17 @@ function ConsolidacionCds() {
   const setRuta = (k) => (v) => setF({ ...f, [k]: v, estado: '', ...(k === 'desde' && v === f.hasta ? { hasta: '' } : {}) });
   const osr = r?.osr || 'OSR';
   const ruta = r?.ruta;
+  const buf = r?.buffer?.join(' / ') || '';
+  const cdEtq = f.cdEtiqueta ?? r?.cdEtq ?? '';
+  const excel = urlApi('/api/optimizacion/consolidacion/excel' + qs({ criterio: f.criterio, diasSS: f.diasSS, desde: cuerpo.desde, hasta: cuerpo.hasta, soloEnDestino: f.soloEnDestino,
+    tipo: f.tipo, cdEtiqueta: f.cdEtiqueta === null ? '' : f.cdEtiqueta || '-', mixtoPct: cuerpo.mixtoPct }));
   return (
     <div className="sec">
       <div className="row spread" style={{ marginBottom: 6 }}>
         <h2 style={{ margin: 0 }}>Consolidación de SKU entre CD{ruta ? ` · ruta ${ruta.desde} → ${ruta.hasta}` : ''}</h2>
-        <a className="btn primary" href={urlApi('/api/optimizacion/consolidacion/excel' + qs({ criterio: f.criterio, diasSS: f.diasSS, desde: cuerpo.desde, hasta: cuerpo.hasta, soloEnDestino: f.soloEnDestino }))}>Exportar a Excel</a>
+        <a className="btn primary" href={excel}>Exportar a Excel</a>
       </div>
-      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más CD y simulación para dejarlos en un solo CD. El stock en {osr} se mantiene, pero cada SKU de {osr} debe tener stock de seguridad fuera de {osr} (días de venta) en un único CD; si no lo tiene, se propone extraer la diferencia desde {osr} (como máximo la mitad de su stock, para no vaciar el automático).{r?.primero?.length > 0 && ` Si el SKU tiene stock en ${r.primero.join(' o ')}, se consolida ahí directamente (parámetro en Configuración).`} El Excel trae todos los SKU, los movimientos por ubicación y el balance por CD.</p>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más CD y simulación para dejarlos en un solo CD. El stock en {osr} se mantiene, pero cada SKU de {osr} debe tener stock de seguridad fuera de {osr} (días de venta) en un único CD; si no lo tiene, se propone extraer la diferencia desde {osr} (como máximo la mitad de su stock, para no vaciar el automático).{buf && ` ${buf} funciona como buffer de reabastecimiento: no es destino, su stock queda como reserva (cuenta como respaldo fuera de ${osr}) y a los SKU que solo están ahí se les abastecen los mismos días de venta en un CD de picking, para no pickear desde ${buf}.`}{cdEtq && ` Los SKU con picking de etiqueta (y los de tarea que salen en pedidos mixtos) se consolidan en ${cdEtq}, para que un pedido con tarea y etiqueta salga de un solo CD.`}{r?.primero?.length > 0 && ` Si el SKU tiene stock en ${r.primero.join(' o ')}, se consolida ahí directamente (parámetro en Configuración).`} El Excel trae todos los SKU, los movimientos por ubicación y el balance por CD.</p>
       <div className="row cons-ctrl" style={{ margin: '10px 0 14px', alignItems: 'flex-end' }}>
         <fieldset className="cons-ruta">
           <legend className="lbl">Simular ruta</legend>
@@ -85,9 +91,21 @@ function ConsolidacionCds() {
               {Object.entries(r?.criterios || { unidades: 'CD con más unidades (menos movimiento)' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select></div>
           <div><label className="lbl" htmlFor="c-ss">Stock de seguridad fuera de {osr} (días)</label><input id="c-ss" type="number" className="w90" min="0" value={f.diasSS} onChange={(e) => set('diasSS')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="c-etq">CD de etiqueta</label>
+            <select id="c-etq" value={cdEtq} onChange={(e) => setF({ ...f, cdEtiqueta: e.target.value, estado: '' })}>
+              <option value="">Sin CD de etiqueta</option>
+              {(r?.cdsEtq || []).map((cd) => <option key={cd} value={cd}>{cd}</option>)}
+            </select></div>
+          {cdEtq && <div><label className="lbl" htmlFor="c-mix">Tarea con pedidos mixtos ≥ %</label><input id="c-mix" type="number" className="w90" min="0" max="100" placeholder={r ? fmt(r.umbral * 100, 0) : ''} value={f.mixtoPct} onChange={(e) => set('mixtoPct')(e.target.value)} disabled={!!r && !r.hayPedidos} /></div>}
         </>}
         {cargando && <span className="note">Simulando…</span>}
       </div>
+      <div className="row" style={{ alignItems: 'center', gap: 8, margin: '-4px 0 12px' }}>
+        <span className="lbl" style={{ margin: 0 }}>Tipo de picking</span>
+        <div className="chips">{TIPOS_PICK.map(([k, t]) => <button key={k} className="chip" aria-pressed={f.tipo === k} onClick={() => setF({ ...f, tipo: k, estado: '' })}>{t}{k && r?.porTipo ? ` · ${fmt(r.porTipo[k])}` : ''}</button>)}</div>
+      </div>
+      {r && !r.hayPicking && <div className="alert warn">No hay archivo de picking cargado: todos los SKU quedan como "Sin picking". Cárgalo en Participación por CD para clasificar los SKU por tipo de picking (tarea / etiqueta).</div>}
+      {r && r.hayPicking && !r.hayPedidos && cdEtq && <div className="alert warn">El archivo de picking cargado no trae pedidos (SOLICITUD): no se pueden detectar los SKU de tarea que salen en pedidos mixtos. Vuelve a cargarlo en Participación por CD.</div>}
       {f.desde && !enRuta && <p className="note" style={{ marginTop: -6 }}>Elige el CD de destino para simular la ruta. Mientras tanto se muestra la consolidación general.</p>}
       {ruta && <p className="note" style={{ marginTop: -6 }}>Ruta: todo el stock de cada SKU en {ruta.desde} se mueve a {ruta.hasta}{ruta.soloEnDestino ? `, solo para los SKU que ya tienen stock en ${ruta.hasta}` : `, incluidos los SKU que hoy no están en ${ruta.hasta}`}. Los demás CD no se tocan; no aplican el criterio de destino ni la regla de prioridad.</p>}
       {r && (
@@ -99,12 +117,14 @@ function ConsolidacionCds() {
             {ruta
               ? <div className="kpi"><div className="k">Quedan en un solo CD</div><div className="v">{fmt(r.resumen.quedanUno)}</div><div className="n">de {fmt(r.resumen.skus)} SKU de la ruta · el resto sigue también en otros CD</div></div>
               : <div className={'kpi ' + (r.resumen.extraerOsr ? 'warn' : '')}><div className="k">Stock de seguridad desde {osr}</div><div className="v">{fmt(r.resumen.extraerOsr)} u.</div><div className="n">a mover al CD de respaldo · {fmt(r.resumen.noCubreSS)} SKU de {osr} siguen sin cubrir {r.diasSS} días fuera (falta reposición)</div></div>}
+            {!ruta && buf && <div className="kpi"><div className="k">Picking desde {buf}</div><div className="v">{fmt(r.pickBuf.total)} u.</div><div className="n">pickeadas en el periodo del archivo · {fmt(r.pickBuf.evitable)} u. son de SKU que quedan con CD de picking · abastecer {fmt(r.resumen.desdeBuffer)} u. desde {buf}</div></div>}
+            {!ruta && r.cdEtq && <div className="kpi"><div className="k">Al CD de etiqueta {r.cdEtq}</div><div className="v">{fmt(r.resumen.alEtq)} SKU</div><div className="n">{fmt(r.resumen.uniEtq)} u. a mover · etiqueta, mixtos{r.umbral > 0 ? ` y tarea con ≥ ${fmt(r.umbral * 100, 0)}% de pedidos mixtos` : ''}</div></div>}
           </div>
           <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)' }}>
             <table>
               <thead><tr><th>CD</th><th className="num">SKU antes</th><th className="num">SKU después</th><th className="num">Unid. salen</th><th className="num">Unid. entran</th><th className="num">Ubic. liberadas</th></tr></thead>
               <tbody>{r.balance.map((b) => (
-                <tr key={b.cd}><td><b>{b.cd}</b>{b.cd === r.osr && <span className="tag" style={{ marginLeft: 6 }}>OSR</span>}{b.cd === r.cdPri && <span className="tag" style={{ marginLeft: 6 }}>prioritario</span>}</td>
+                <tr key={b.cd}><td><b>{b.cd}</b>{b.cd === r.osr && <span className="tag" style={{ marginLeft: 6 }}>OSR</span>}{b.cd === r.cdPri && <span className="tag" style={{ marginLeft: 6 }}>prioritario</span>}{r.buffer.includes(b.cd) && <span className="tag" style={{ marginLeft: 6 }}>buffer</span>}{b.cd === r.cdEtq && <span className="tag" style={{ marginLeft: 6 }}>etiqueta</span>}</td>
                   <td className="num">{fmt(b.skusAntes)}</td><td className="num">{fmt(b.skusDespues)}</td><td className="num">{fmt(b.sale)}</td><td className="num">{fmt(b.entra)}</td><td className="num">{fmt(b.ubLibera)}</td></tr>
               ))}</tbody>
             </table>
@@ -121,28 +141,172 @@ function ConsolidacionCds() {
             </div>
             <div className="chips">{['A', 'B', 'C'].map((a) => <button key={a} className="chip" aria-pressed={f.abc === a} onClick={() => alt('abc', a)}>Clase {a}</button>)}</div>
           </div>
-          <div className="tbl" style={{ maxHeight: 420 }}>
-            <table>
-              <thead>
-                <tr><th colSpan={4} /><th colSpan={r.cds.length + 1} className="grp">Unidades por CD hoy</th><th colSpan={7} /></tr>
-                <tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th>{r.cds.map((cd) => <th key={cd} className="num">{cd}</th>)}<th className="num">Total</th><th>CD destino</th><th className="num">Mover</th><th className="num">Libera</th><th className="num">SS req.</th><th className="num">Extraer de {osr}</th><th className="num">Fuera de {osr} después</th><th>Estado</th></tr></thead>
-              <tbody>{r.detalle.map((x) => (
-                <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td>
-                  <td className="num">{fmt(x.ventaDia, 1)}</td>
-                  {r.cds.map((cd) => <td key={cd} className={'num' + (cd === x.destino ? ' cons-dest' : '')} title={cd === x.destino ? 'CD destino' : undefined}>{x.unidades[cd] ? fmt(x.unidades[cd]) : <span className="muted">—</span>}</td>)}
-                  <td className="num">{fmt(x.total)}</td>
-                  <td><b>{x.destino}</b>{x.osrDespues > 0 && <span className="muted"> + {osr}</span>}<div className="note" style={{ margin: 0 }}>{x.motivoDestino}</div></td>
-                  <td className="num">{fmt(x.uniMover)}</td><td className="num">{fmt(x.ubLibera)}</td>
-                  <td className="num">{x.ss === null ? '—' : fmt(x.ss)}</td><td className="num">{x.extraerOsr ? <b>{fmt(x.extraerOsr)}</b> : '—'}</td>
-                  <td className="num" style={x.cubreSS === false ? { color: 'var(--bad)' } : undefined} title={x.cubreSS === false ? 'No alcanza el stock de seguridad' : undefined}>{x.ssDespues === null ? '—' : fmt(x.ssDespues)}</td>
-                  <td><span className={'pill ' + TONO_ESTADO[x.estado]}>{x.estado}</span></td></tr>
-              ))}</tbody>
-            </table>
+          <div className="row spread" style={{ marginBottom: 8 }}>
+            <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+              <div className="chips">
+                <button className="chip" aria-pressed={vista === 'sku'} onClick={() => setVista('sku')}>Por SKU · {fmt(r.filtrados)}</button>
+                <button className="chip" aria-pressed={vista === 'depto'} onClick={() => setVista('depto')}>Por departamento · {fmt(r.porDepto.length)}</button>
+              </div>
+              <label className="inline" style={{ fontSize: 13 }}>Mostrar
+                <select value={f.top} onChange={(e) => set('top')(e.target.value)} style={{ width: 'auto', marginLeft: 6 }}>
+                  <option value="">Todos</option>{[10, 20, 50, 100].map((n) => <option key={n} value={n}>Top {n}</option>)}
+                </select></label>
+              <span className="note" style={{ margin: 0 }}>Clic en un encabezado para ordenar: ▼ los más · ▲ los menos</span>
+            </div>
+            {f.depto && vista === 'sku' && <button className="chip" aria-pressed onClick={() => set('depto')('')}>{f.depto} ✕</button>}
           </div>
-          {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU (clase A primero, por venta diaria). El Excel trae todos.</p>}
+          {vista === 'depto'
+            ? <TablaDeptos r={r} osr={osr} buf={buf} top={Number(f.top) || 0} onDepto={(d) => { setF({ ...f, depto: d }); setVista('sku'); }} />
+            : <>
+              <TablaConsolidacion r={r} osr={osr} buf={buf} orden={{ k: f.orden, dir: f.dir }} onOrden={(k, num) => setF({ ...f, ...cambiarOrden({ k: f.orden, dir: f.dir }, k, num) })} />
+              {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU ({f.orden ? 'según el orden elegido' : 'clase A primero, por venta diaria'}). El Excel trae todos.</p>}
+            </>}
         </>
       )}
     </div>
+  );
+}
+
+/** Cambio de orden al hacer clic en un encabezado: la primera vez números de mayor a menor y textos A-Z; la segunda, al revés. */
+const cambiarOrden = (o, k, num) => (o.k === k ? { orden: k, dir: o.dir === 'asc' ? 'desc' : 'asc' } : { orden: k, dir: num ? 'desc' : 'asc' });
+const valorCol = (x, k) => (k.startsWith('cd:') ? x.unidades[k.slice(3)] || 0 : k.startsWith('tipo:') ? x.tipos[k.slice(5)] || 0 : x[k]);
+function ordenarFilas(l, o) {
+  if (!o.k) return l;
+  const s = o.dir === 'asc' ? 1 : -1;
+  return [...l].sort((a, b) => {
+    const va = valorCol(a, o.k), vb = valorCol(b, o.k);
+    if (va === null || va === undefined) return vb === null || vb === undefined ? 0 : 1;
+    if (vb === null || vb === undefined) return -1;
+    return s * (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'es', { numeric: true }));
+  });
+}
+/** Encabezado ordenable. */
+function ThOrden({ k, num, orden, onOrden, children }) {
+  if (!k) return <th className={num ? 'num' : ''}>{children}</th>;
+  const act = orden.k === k;
+  return (
+    <th className={num ? 'num' : ''} aria-sort={act ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="th-ord" onClick={() => onOrden(k, num)} title="Ordenar">{children}<span className="flecha" aria-hidden="true">{act ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span></button>
+    </th>
+  );
+}
+
+/**
+ * Detalle de la consolidación entre CD. Las columnas sin datos en las filas que se muestran (CD sin stock, stock de
+ * seguridad cuando no hay SKU de OSR, picking desde buffer, etc.) se ocultan para que la tabla quede legible.
+ */
+function TablaConsolidacion({ r, osr, buf, orden, onOrden }) {
+  const d = r.detalle;
+  const hay = (fn) => d.some(fn);
+  const nota = (v) => <span className="muted">{v}</span>;
+  const cdsVer = r.cds.filter((cd) => hay((x) => x.unidades[cd] > 0));
+  // [encabezado, celda, clase, visible]
+  const antes = [
+    ['Clase', (x) => <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>, '', true, 'matriz'],
+    ['Tipo picking', (x) => r.tipos[x.tipoPick], '', r.hayPicking, 'tipoPick'],
+    ['% pedidos mixtos', (x) => (x.pctMixto > 0 ? fmt(x.pctMixto * 100, 0) + '%' : nota('—')), 'num', hay((x) => x.pctMixto > 0), 'pctMixto'],
+    [`Pickeado en ${buf}`, (x) => (x.pickBuf > 0 ? fmt(x.pickBuf) : nota('—')), 'num', !!buf && hay((x) => x.pickBuf > 0), 'pickBuf'],
+    ['SKU', (x) => x.sku, 'mono', true, 'sku'],
+    ['Descripción', (x) => x.desc, 'wrap', true, 'desc'],
+    ['Venta/día', (x) => fmt(x.ventaDia, 1), 'num', true, 'ventaDia'],
+  ].filter((c) => c[3]);
+  const despues = [
+    ['CD destino', (x) => <><b>{x.destino}</b>{x.osrDespues > 0 && <span className="muted"> + {osr}</span>}<div className="note" style={{ margin: 0 }}>{x.motivoDestino}</div></>, '', true, 'destino'],
+    ['Mover', (x) => fmt(x.uniMover), 'num', true, 'uniMover'],
+    [`Desde ${buf}`, (x) => (x.desdeBuffer > 0 ? <b>{fmt(x.desdeBuffer)}</b> : nota('—')), 'num', !!buf && hay((x) => x.desdeBuffer > 0), 'desdeBuffer'],
+    ['Libera', (x) => fmt(x.ubLibera), 'num', hay((x) => x.ubLibera > 0), 'ubLibera'],
+    ['SS req.', (x) => (x.ss === null ? nota('—') : fmt(x.ss)), 'num', hay((x) => x.ss !== null), 'ss'],
+    [`Extraer de ${osr}`, (x) => (x.extraerOsr ? <b>{fmt(x.extraerOsr)}</b> : nota('—')), 'num', hay((x) => x.extraerOsr > 0), 'extraerOsr'],
+    [`Fuera de ${osr} después`, (x) => (x.ssDespues === null ? nota('—')
+      : <span style={x.cubreSS === false ? { color: 'var(--bad)' } : undefined} title={x.cubreSS === false ? 'No alcanza el stock de seguridad' : undefined}>{fmt(x.ssDespues)}</span>), 'num', hay((x) => x.ssDespues !== null), 'ssDespues'],
+    ['Estado', (x) => <span className={'pill ' + TONO_ESTADO[x.estado]}>{x.estado}</span>, '', true, 'estado'],
+  ].filter((c) => c[3]);
+  const ocultos = r.cds.length - cdsVer.length;
+  return (
+    <>
+      <div className="tbl" style={{ maxHeight: 420 }}>
+        <table>
+          <thead>
+            <tr><th colSpan={antes.length} /><th colSpan={cdsVer.length + 1} className="grp">Unidades por CD hoy</th><th colSpan={despues.length} /></tr>
+            <tr>{antes.map(([h, , c, , k]) => <ThOrden key={h} k={k} num={c === 'num'} orden={orden} onOrden={onOrden}>{h}</ThOrden>)}
+              {cdsVer.map((cd) => <ThOrden key={cd} k={'cd:' + cd} num orden={orden} onOrden={onOrden}>{cd}</ThOrden>)}<ThOrden k="total" num orden={orden} onOrden={onOrden}>Total</ThOrden>
+              {despues.map(([h, , c, , k]) => <ThOrden key={h} k={k} num={c === 'num'} orden={orden} onOrden={onOrden}>{h}</ThOrden>)}</tr>
+          </thead>
+          <tbody>{d.map((x) => (
+            <tr key={x.sku}>
+              {antes.map(([h, f, c]) => <td key={h} className={c}>{f(x)}</td>)}
+              {cdsVer.map((cd) => <td key={cd} className={'num' + (cd === x.destino ? ' cons-dest' : '')} title={cd === x.destino ? 'CD destino' : undefined}>{x.unidades[cd] ? fmt(x.unidades[cd]) : nota('—')}</td>)}
+              <td className="num">{fmt(x.total)}</td>
+              {despues.map(([h, f, c]) => <td key={h} className={c}>{f(x)}</td>)}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {d.length > 0 && ocultos > 0 && <p className="note">Se ocultan las columnas sin datos en estas filas ({r.cds.filter((cd) => !cdsVer.includes(cd)).join(', ')} sin stock en estos SKU). El Excel trae todas.</p>}
+    </>
+  );
+}
+
+/** Apertura por departamento de la consolidación entre CD (mismos filtros de tipo, estado y clase). Clic en un depto: sus SKU. */
+function TablaDeptos({ r, osr, buf, top, onDepto }) {
+  const [orden, setOrden] = useState({ k: '', dir: 'desc' });
+  const onOrden = (k, num) => { const o = cambiarOrden(orden, k, num); setOrden({ k: o.orden, dir: o.dir }); };
+  const todos = r.porDepto;
+  const ord = ordenarFilas(todos, orden);
+  const d = top ? ord.slice(0, top) : ord;
+  const hay = (fn) => d.some(fn);
+  const nota = (v) => <span className="muted">{v}</span>;
+  const n0 = (v) => (v ? fmt(v) : nota('—'));
+  const cdsVer = r.cds.filter((cd) => hay((x) => x.unidades[cd] > 0));
+  const tiposVer = Object.keys(r.tipos).filter((t) => hay((x) => x.tipos[t] > 0));
+  // [encabezado, celda, clase, visible, clave de orden]
+  const antes = [
+    ['Depto', (x) => x.depto, 'wrap', true, 'depto'],
+    ['SKU', (x) => fmt(x.skus), 'num', true, 'skus'],
+    ['Venta/día', (x) => fmt(x.ventaDia, 1), 'num', true, 'ventaDia'],
+    ...tiposVer.map((t) => [r.tipos[t], (x) => n0(x.tipos[t]), 'num', r.hayPicking, 'tipo:' + t]),
+    [`Pickeado en ${buf}`, (x) => n0(x.pickBuf), 'num', !!buf && hay((x) => x.pickBuf > 0), 'pickBuf'],
+  ].filter((c) => c[3]);
+  const despues = [
+    ['Mover', (x) => <b>{fmt(x.uniMover)}</b>, 'num', true, 'uniMover'],
+    [`Desde ${buf}`, (x) => n0(x.desdeBuffer), 'num', !!buf && hay((x) => x.desdeBuffer > 0), 'desdeBuffer'],
+    [`Extraer de ${osr}`, (x) => n0(x.extraerOsr), 'num', hay((x) => x.extraerOsr > 0), 'extraerOsr'],
+    ['Ubic. a mover', (x) => fmt(x.ubMover), 'num', true, 'ubMover'],
+    ['Libera', (x) => n0(x.ubLibera), 'num', hay((x) => x.ubLibera > 0), 'ubLibera'],
+    [`Al CD ${r.cdEtq}`, (x) => n0(x.alEtq), 'num', !!r.cdEtq && hay((x) => x.alEtq > 0), 'alEtq'],
+    ['Estados', (x) => Object.entries(x.estados).sort((a, b) => b[1] - a[1]).map(([e, n]) => (
+      <span key={e} className={'pill ' + TONO_ESTADO[e]} style={{ marginRight: 4 }}>{e} · {fmt(n)}</span>)), '', true],
+  ].filter((c) => c[3]);
+  const tot = (k) => d.reduce((s, x) => s + x[k], 0);
+  if (!d.length) return <p className="note">Sin SKU para este filtro.</p>;
+  return (
+    <>
+      <div className="tbl" style={{ maxHeight: 420 }}>
+        <table>
+          <thead>
+            <tr><th colSpan={antes.length} /><th colSpan={cdsVer.length + 1} className="grp">Unidades por CD hoy (SKU con acción)</th><th colSpan={despues.length} /></tr>
+            <tr>{antes.map(([h, , c, , k]) => <ThOrden key={h} k={k} num={c === 'num'} orden={orden} onOrden={onOrden}>{h}</ThOrden>)}
+              {cdsVer.map((cd) => <ThOrden key={cd} k={'cd:' + cd} num orden={orden} onOrden={onOrden}>{cd}</ThOrden>)}<ThOrden k="total" num orden={orden} onOrden={onOrden}>Total</ThOrden>
+              {despues.map(([h, , c, , k]) => <ThOrden key={h} k={k} num={c === 'num'} orden={orden} onOrden={onOrden}>{h}</ThOrden>)}</tr>
+          </thead>
+          <tbody>
+            {d.map((x) => (
+              <tr key={x.depto} style={{ cursor: 'pointer' }} onClick={() => onDepto(x.depto)} title="Ver los SKU de este depto">
+                {antes.map(([h, f, c]) => <td key={h} className={c}>{f(x)}</td>)}
+                {cdsVer.map((cd) => <td key={cd} className="num">{n0(x.unidades[cd])}</td>)}
+                <td className="num">{fmt(x.total)}</td>
+                {despues.map(([h, f, c]) => <td key={h} className={c}>{f(x)}</td>)}
+              </tr>
+            ))}
+            <tr className="tot"><td>{top && todos.length > d.length ? `Total top ${d.length}` : 'Total'}</td><td className="num">{fmt(tot('skus'))}</td><td className="num">{fmt(tot('ventaDia'), 1)}</td>
+              {antes.slice(3).map(([h]) => <td key={h} />)}
+              {cdsVer.map((cd) => <td key={cd} className="num">{fmt(d.reduce((s, x) => s + (x.unidades[cd] || 0), 0))}</td>)}
+              <td className="num">{fmt(tot('total'))}</td><td className="num">{fmt(tot('uniMover'))}</td>{despues.slice(1).map(([h]) => <td key={h} />)}</tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="note">{orden.k ? 'Departamentos en el orden elegido' : 'Departamentos ordenados por unidades a mover'}{top && todos.length > d.length ? ` · se muestran ${d.length} de ${todos.length}` : ''}. Clic en un depto para ver sus SKU. Se ocultan las columnas sin datos; el Excel (hoja "Por depto") trae todas.</p>
+    </>
   );
 }
 

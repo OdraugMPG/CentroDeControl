@@ -22,13 +22,14 @@ const AL = {
   facility: 'FACILITY',
   tipo: 'TIPO_PICKING|TIPO PICKING',
   estado: 'DESC_ESTADO|ESTADO',
+  pedido: 'SOLICITUD|PEDIDO|NRO PEDIDO',
   fecha: 'FECHA_SALIDA|FECHA SALIDA|FECHA_PICKING|FECHA_VENTA',
 };
 export const TIPOS_PICKING = ['TAREA', 'ETIQUETA'];
 export const ESTADOS = { EN: 'YA EN OSR', CAND: 'APTO SIN OSR', NO: 'NO APTO OSR', SIN_STOCK: 'NO ESTÁ EN LA BASE', SIN_VAL: 'SIN VALIDAR (sin Base)' };
 const LIMITE = 500;
 
-const skuKey = (s) => txt(s).replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+export const skuKey = (s) => txt(s).replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
 const tipoDe = (s) => { const t = up(s); return t.includes('TAREA') ? 'TAREA' : t.includes('ETIQ') ? 'ETIQUETA' : t || '(SIN TIPO)'; };
 const error = (m) => Object.assign(new Error(m), { status: 400 });
 
@@ -39,6 +40,7 @@ export async function cargarVentaCd(buffer, archivo) {
   const t = leerTabla(buffer);
   const { c } = t;
   const ag = new Map();
+  const ped = new Map(); // pedido (SOLICITUD) → tipos de picking (1 = tarea, 2 = etiqueta), fecha y SKU
   let filas = 0, sinFecha = 0, anuladas = 0;
   for await (const r of t.filas()) {
     const sku = skuKey(r[c.sku]);
@@ -56,13 +58,39 @@ export async function cargarVentaCd(buffer, archivo) {
     if (!x) ag.set(k, x = { fecha, cd, tipo, sku, dpto: c.dpto >= 0 ? txt(r[c.dpto]) : '', desc: c.desc >= 0 ? txt(r[c.desc]) : '', u: 0, l: 0 });
     x.u += u; x.l++;
     filas++;
+    const nPed = c.pedido >= 0 ? txt(r[c.pedido]) : '';
+    if (nPed) {
+      let o = ped.get(nPed);
+      if (!o) ped.set(nPed, o = { fecha, m: 0, skus: new Set() });
+      o.m |= tipo === 'TAREA' ? 1 : tipo === 'ETIQUETA' ? 2 : 0;
+      o.skus.add(sku);
+    }
   }
   if (!filas) throw error('El archivo no tiene líneas con SKU y unidades pickeadas.');
   const regs = [...ag.values()];
   const fechas = [...new Set(regs.map((x) => x.fecha).filter(Boolean))].sort();
+  // pedidos por SKU y cuántos de ellos mezclan tarea y etiqueta
+  const pk = new Map();
+  let mixtos = 0;
+  for (const o of ped.values()) {
+    if (o.m === 3) mixtos++;
+    for (const sku of o.skus) {
+      const k = `${o.fecha}|${sku}`;
+      let x = pk.get(k);
+      if (!x) pk.set(k, x = { fecha: o.fecha, sku, n: 0, mix: 0 });
+      x.n++; if (o.m === 3) x.mix++;
+    }
+  }
+  const regsPed = [...pk.values()];
   await tx(async (cn) => {
     await cn.query('DELETE FROM venta_cd WHERE fecha = ANY($1::date[])', [fechas]);
-    if (sinFecha) await cn.query('DELETE FROM venta_cd WHERE fecha IS NULL');
+    await cn.query('DELETE FROM venta_cd_ped WHERE fecha = ANY($1::date[])', [fechas]);
+    if (sinFecha) { await cn.query('DELETE FROM venta_cd WHERE fecha IS NULL'); await cn.query('DELETE FROM venta_cd_ped WHERE fecha IS NULL'); }
+    for (let i = 0; i < regsPed.length; i += 5000) {
+      const l = regsPed.slice(i, i + 5000);
+      await cn.query('INSERT INTO venta_cd_ped (fecha, sku, pedidos, mixtos) SELECT * FROM unnest($1::date[], $2::text[], $3::int[], $4::int[])',
+        [l.map((x) => x.fecha), l.map((x) => x.sku), l.map((x) => x.n), l.map((x) => x.mix)]);
+    }
     for (let i = 0; i < regs.length; i += 5000) {
       const l = regs.slice(i, i + 5000);
       await cn.query(`INSERT INTO venta_cd (fecha, cd, tipo, sku, dpto, descripcion, unidades, lineas)
@@ -70,7 +98,7 @@ export async function cargarVentaCd(buffer, archivo) {
       [l.map((x) => x.fecha), l.map((x) => x.cd), l.map((x) => x.tipo), l.map((x) => x.sku), l.map((x) => x.dpto), l.map((x) => x.desc), l.map((x) => x.u), l.map((x) => x.l)]);
     }
   });
-  return { archivo, hoja: t.hoja, filas, anuladas, registros: regs.length, desde: fechas[0] || null, hasta: fechas[fechas.length - 1] || null, dias: fechas.length, sinFecha,
+  return { archivo, hoja: t.hoja, filas, anuladas, pedidos: ped.size, pedidosMixtos: mixtos, registros: regs.length, desde: fechas[0] || null, hasta: fechas[fechas.length - 1] || null, dias: fechas.length, sinFecha,
     unidades: c.qtyPick >= 0 ? 'QTY_PICKING' : 'QTY', fecha: t.enc[c.fecha] || '', tipos: [...new Set(regs.map((x) => x.tipo))].sort(cmp) };
 }
 
@@ -167,7 +195,25 @@ function cachePivot(buffer, zip) {
 
 export async function borrarVentaCd() {
   const r = await q('DELETE FROM venta_cd');
+  await q('DELETE FROM venta_cd_ped');
   return { eliminadas: r.rowCount };
+}
+
+/** Picking por SKU de todo lo cargado (para la consolidación entre CD): unidades por tipo y por CD, pedidos y pedidos mixtos. */
+export async function pickingPorSku() {
+  const m = new Map();
+  const de = (sku) => { let x = m.get(sku); if (!x) m.set(sku, x = { u: 0, tarea: 0, etiqueta: 0, porCd: {}, pedidos: 0, mixtos: 0 }); return x; };
+  const { rows } = await q('SELECT sku, tipo, cd, sum(unidades)::float8 AS u FROM venta_cd GROUP BY sku, tipo, cd');
+  for (const r of rows) {
+    const x = de(r.sku);
+    x.u += r.u;
+    if (r.tipo === 'TAREA') x.tarea += r.u; else if (r.tipo === 'ETIQUETA') x.etiqueta += r.u;
+    x.porCd[r.cd] = (x.porCd[r.cd] || 0) + r.u;
+  }
+  const { rows: pd } = await q('SELECT sku, sum(pedidos)::int AS n, sum(mixtos)::int AS mix FROM venta_cd_ped GROUP BY sku');
+  for (const r of pd) { const x = de(r.sku); x.pedidos = r.n; x.mixtos = r.mix; }
+  const { rows: d } = await q('SELECT count(DISTINCT fecha)::int AS dias, (SELECT count(*) FROM venta_cd_ped)::int AS ped FROM venta_cd');
+  return { skus: m, dias: d[0].dias, hayPedidos: d[0].ped > 0 };
 }
 
 async function infoCarga() {

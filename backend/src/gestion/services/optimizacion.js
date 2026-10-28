@@ -9,6 +9,7 @@ import { up, cmp } from '../engine/util.js';
 import { esAptoOsr } from '../engine/base.js';
 import { libro } from './tareas.js';
 import { tareasConsolidacion } from '../engine/consolidacion.js';
+import { pickingPorSku, skuKey } from './participacionCd.js';
 
 // SKU de alta rotación que conviene tener en el CD prioritario
 export const CLASES_TRAER = ['AX', 'AY', 'BX'];
@@ -253,22 +254,38 @@ export async function generarIngresoOsr(params = {}) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Consolidación entre CD: SKU con stock repartido en varios CD y simulación para dejarlos en uno solo.
+// Consolidación entre CD: SKU con stock repartido en varios CD de picking y simulación para dejarlos en uno solo.
 // Regla OSR: el stock que está en OSR se mantiene, pero el SKU debe tener stock de seguridad fuera de OSR
 // (N días de venta) en un único CD de respaldo; si no lo tiene, se propone extraer la diferencia desde OSR.
+// CD buffer (RCI): reserva de reabastecimiento. No es destino, su stock no se mueve (cuenta como respaldo fuera
+// de OSR) y los SKU que solo tienen stock ahí reciben N días de venta en un CD de picking, para no pickear del buffer.
+// CD de etiqueta: los SKU con picking de ETIQUETA (y los de tarea que salen en pedidos mixtos) se consolidan en él,
+// para que un pedido con tarea y etiqueta salga de un solo CD. El tipo de picking sale del archivo de Participación por CD.
 // ---------------------------------------------------------------------------------------------
 export const CRITERIOS_CONS = { unidades: 'CD con más unidades (menos movimiento)', prioritario: 'Alta rotación al CD prioritario; el resto al CD con más unidades' };
 const MAX_EXTRAER_OSR = 0.5;
 export const ESTADOS_RUTA = { CONSOLIDAR: 'Consolidar en destino', NUEVO: 'Nuevo en destino' };
-export const ESTADOS_CONS = { CONSOLIDAR: 'Consolidar', CONS_OSR: 'Consolidar fuera de OSR', SIN_SS: 'Sin stock de seguridad fuera de OSR', SS_BAJO: 'Stock de seguridad insuficiente' };
+export const ESTADOS_CONS = { CONSOLIDAR: 'Consolidar', ETQ: 'Llevar al CD de etiqueta', BUFFER: 'Abastecer picking desde buffer', CONS_OSR: 'Consolidar fuera de OSR',
+  SIN_SS: 'Sin stock de seguridad fuera de OSR', SS_BAJO: 'Stock de seguridad insuficiente' };
+export const TIPOS_PICK = { TAREA: 'Tarea', ETIQUETA: 'Etiqueta', MIXTO: 'Tarea y etiqueta', SIN: 'Sin picking' };
+const listaCds = (s) => String(s || '').split('|').map(up).filter(Boolean);
 
-async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, desde = '', hasta = '', soloEnDestino = true } = {}) {
+async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, desde = '', hasta = '', soloEnDestino = true, tipo = '', cdEtiqueta, mixtoPct } = {}) {
   const { carga, p, filas, clase } = await datos();
   const osr = up(p.cdOsr), cdPri = up(p.cdPrioritario);
   const D = Math.max(0, Number(diasSS) || 0);
   const crit = criterio in CRITERIOS_CONS ? criterio : 'unidades';
-  const primero = String(p.cdsConsPrimero || '').split('|').map(up).filter(Boolean);
   const cds = [...new Set(filas.map((r) => r.cd))].sort(cmp);
+  const buffer = listaCds(p.cdsBuffer).filter((cd) => cd !== osr && cds.includes(cd));
+  const esBuf = (cd) => buffer.includes(cd);
+  const primero = listaCds(p.cdsConsPrimero).filter((cd) => !esBuf(cd));
+  const cdsPick = cds.filter((cd) => cd !== osr && !esBuf(cd));
+  const etqPar = up(cdEtiqueta === undefined || cdEtiqueta === null ? p.cdEtiqueta : cdEtiqueta);
+  const cdEtq = cdsPick.includes(etqPar) ? etqPar : '';
+  const umbral = mixtoPct !== undefined && mixtoPct !== '' && mixtoPct !== null ? Math.max(0, Number(mixtoPct) || 0) : Number(p.consMixtoPct) || 0;
+  const tipoSel = tipo in TIPOS_PICK ? tipo : '';
+  // picking por SKU (archivo de Participación por CD)
+  const pk = await pickingPorSku();
   // simulación de una ruta Desde → Hasta (el OSR queda fuera: tiene su propia regla de stock de seguridad)
   let ruta = null;
   if (desde || hasta) {
@@ -283,7 +300,11 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
     let x = sk.get(r.sku);
     if (!x) {
       const c = clase.get(r.sku);
-      x = { sku: r.sku, desc: r.desc, depto: r.depto, matriz: c?.matriz || 'CZ', abc: c?.abc || 'C', ventaDia: (c?.ventas || 0) / DIAS_VENTAS, porCd: new Map() };
+      const k = pk.skus.get(skuKey(r.sku));
+      const tipoPick = !k || !(k.tarea + k.etiqueta) ? 'SIN' : k.tarea && k.etiqueta ? 'MIXTO' : k.etiqueta ? 'ETIQUETA' : 'TAREA';
+      x = { sku: r.sku, desc: r.desc, depto: r.depto, matriz: c?.matriz || 'CZ', abc: c?.abc || 'C', ventaDia: (c?.ventas || 0) / DIAS_VENTAS, porCd: new Map(),
+        tipoPick, pctMixto: k?.pedidos ? k.mixtos / k.pedidos : 0, pickBuf: k ? buffer.reduce((s, cd) => s + (k.porCd[cd] || 0), 0) : 0,
+        pickDia: k && pk.dias ? k.u / pk.dias : 0 };
       sk.set(r.sku, x);
     }
     let e = x.porCd.get(r.cd);
@@ -295,18 +316,26 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
     if (!skuEnUb.has(ku)) skuEnUb.set(ku, new Set());
     skuEnUb.get(ku).add(r.sku);
   }
+  const porTipo = Object.fromEntries(Object.keys(TIPOS_PICK).map((t) => [t, 0]));
+  for (const x of sk.values()) porTipo[x.tipoPick]++;
+  const skus = [...sk.values()].filter((x) => !tipoSel || x.tipoPick === tipoSel);
 
   const lista = [], movs = [];
-  const tot = { skus: sk.size, unCd: 0, dispersos: 0, enOsr: 0 };
-  for (const x of sk.values()) {
+  const tot = { skus: skus.length, unCd: 0, dispersos: 0, enOsr: 0 };
+  const pickBuf = { total: 0, evitable: 0 };
+  for (const x of skus) {
     const enOsr = x.porCd.get(osr)?.uni || 0;
     const fuera = [...x.porCd.values()].filter((e) => e.cd !== osr);
-    if (x.porCd.size === 1) tot.unCd++; else tot.dispersos++;
+    const pick = fuera.filter((e) => !esBuf(e.cd));
+    const bufs = fuera.filter((e) => esBuf(e.cd));
+    if (pick.length + (enOsr ? 1 : 0) <= 1) tot.unCd++; else tot.dispersos++;
     if (enOsr) tot.enOsr++;
+    pickBuf.total += x.pickBuf;
     const base = (destino, motivoDestino) => ({ sku: x.sku, desc: x.desc, depto: x.depto, matriz: x.matriz, abc: x.abc, ventaDia: x.ventaDia,
+      tipoPick: x.tipoPick, pctMixto: x.pctMixto, pickBuf: x.pickBuf,
       unidades: Object.fromEntries([...x.porCd.values()].map((e) => [e.cd, e.uni])), nCds: x.porCd.size,
       total: [...x.porCd.values()].reduce((s, e) => s + e.uni, 0), nUb: [...x.porCd.values()].reduce((s, e) => s + e.ubic.size, 0),
-      osr: enOsr, destino, motivoDestino, uniMover: 0, ubMover: 0, ubLibera: 0, ss: null, extraerOsr: 0 });
+      osr: enOsr, destino, motivoDestino, uniMover: 0, ubMover: 0, ubLibera: 0, ss: null, extraerOsr: 0, desdeBuffer: 0, vaEtq: false });
     const mover = (r, e, destino) => {
       for (const u of e.ubic.values()) {
         const libera = skuEnUb.get(e.cd + '|' + u.ubic).size === 1;
@@ -314,6 +343,17 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
         r.uniMover += u.qty; r.ubMover++;
         if (libera) r.ubLibera++;
       }
+    };
+    // retira hasta "cant" unidades de las ubicaciones de un CD, primero la de más unidades
+    const extraer = (r, e, cant, destino, motivo) => {
+      let resta = cant, n = 0;
+      for (const u of [...e.ubic.values()].sort((a, b) => b.qty - a.qty || cmp(a.ubic, b.ubic))) {
+        if (resta <= 0) break;
+        const t = Math.min(u.qty, resta);
+        movs.push({ sku: x.sku, desc: x.desc, matriz: x.matriz, cdOrigen: e.cd, ubic: u.ubic, piso: u.piso, zp: u.zp, qty: t, cdDestino: destino, motivo, libera: false });
+        r.ubMover++; resta -= t; n += t;
+      }
+      return n;
     };
 
     // ruta elegida (Desde → Hasta): todo el stock del SKU en el CD de origen pasa al de destino; los demás CD no se tocan
@@ -329,34 +369,46 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
     }
 
     const ss = Math.ceil(x.ventaDia * D);
-    const fueraUni = fuera.reduce((s, e) => s + e.uni, 0);
+    const fueraUni = fuera.reduce((s, e) => s + e.uni, 0); // el buffer cuenta como respaldo fuera de OSR
+    const bufUni = bufs.reduce((s, e) => s + e.uni, 0);
     const faltaSS = enOsr ? Math.max(0, ss - fueraUni) : 0;
-    if (fuera.length < 2 && !faltaSS) continue;
-
-    // CD destino (siempre fuera de OSR): primero un CD de consolidación directa donde el SKU ya tenga stock (RCI);
-    // si no, el de más unidades, o el prioritario para la alta rotación
-    fuera.sort((a, b) => b.uni - a.uni || b.ubic.size - a.ubic.size || (b.cd === cdPri) - (a.cd === cdPri) || cmp(a.cd, b.cd));
-    let destino = fuera[0]?.cd || cdPri, motivoDestino = fuera.length ? 'Más unidades' : 'CD prioritario';
-    if (crit === 'prioritario' && CLASES_TRAER.includes(x.matriz) && cds.includes(cdPri)) { destino = cdPri; motivoDestino = 'CD prioritario'; }
-    const directo = primero.find((cd) => cd !== osr && x.porCd.get(cd)?.uni > 0);
+    // CD destino (nunca OSR ni buffer): CD de etiqueta; si no, consolidación directa donde ya tenga stock;
+    // si no, el de más unidades o el prioritario para la alta rotación
+    pick.sort((a, b) => b.uni - a.uni || b.ubic.size - a.ubic.size || (b.cd === cdPri) - (a.cd === cdPri) || cmp(a.cd, b.cd));
+    const sinPick = cdsPick.includes(cdPri) ? cdPri : cdsPick[0];
+    let destino = pick[0]?.cd || sinPick, motivoDestino = pick.length ? 'Más unidades' : 'CD prioritario';
+    if (crit === 'prioritario' && CLASES_TRAER.includes(x.matriz) && cdsPick.includes(cdPri)) { destino = cdPri; motivoDestino = 'CD prioritario'; }
+    const directo = primero.find((cd) => x.porCd.get(cd)?.uni > 0);
     if (directo) { destino = directo; motivoDestino = `Prioridad ${directo}`; }
-    const r = { ...base(destino, motivoDestino), ss: enOsr ? ss : null };
-    for (const e of fuera) if (e.cd !== destino) mover(r, e, destino);
+    const vaEtq = !!cdEtq && (x.tipoPick === 'ETIQUETA' || x.tipoPick === 'MIXTO' || (x.tipoPick === 'TAREA' && umbral > 0 && x.pctMixto >= umbral));
+    if (vaEtq) { destino = cdEtq; motivoDestino = x.tipoPick === 'TAREA' ? `Pedidos mixtos (${Math.round(x.pctMixto * 100)}%)` : `Picking ${TIPOS_PICK[x.tipoPick].toLowerCase()}`; }
+    // sin stock en CD de picking ni en OSR: se abastece el picking con N días de venta desde el buffer
+    const diaAbast = Math.max(x.ventaDia, x.pickDia);
+    const abastecer = !enOsr && !pick.length && bufUni > 0 && diaAbast > 0 ? Math.min(bufUni, Math.max(1, Math.ceil(diaAbast * D))) : 0;
+    const aMover = pick.filter((e) => e.cd !== destino);
+    if (!aMover.length && !abastecer && !faltaSS) {
+      if (pick.length || enOsr) pickBuf.evitable += x.pickBuf;
+      continue;
+    }
+    const r = { ...base(destino, motivoDestino), ss: enOsr ? ss : null, vaEtq };
+    for (const e of aMover) mover(r, e, destino);
+    let resta = abastecer;
+    for (const e of resta ? bufs.sort((a, b) => b.uni - a.uni) : []) {
+      if (resta <= 0) break;
+      const n = extraer(r, e, resta, destino, 'Abastecer picking desde buffer');
+      r.desdeBuffer += n; resta -= n;
+    }
     // stock de seguridad fuera de OSR: lo que falta se extrae desde las ubicaciones de OSR con más unidades,
     // como máximo la mitad del stock de OSR para no vaciar el automático
-    let resta = Math.min(faltaSS, Math.floor(enOsr * MAX_EXTRAER_OSR));
-    for (const u of resta ? [...x.porCd.get(osr).ubic.values()].sort((a, b) => b.qty - a.qty || cmp(a.ubic, b.ubic)) : []) {
-      if (resta <= 0) break;
-      const t = Math.min(u.qty, resta);
-      movs.push({ sku: x.sku, desc: x.desc, matriz: x.matriz, cdOrigen: osr, ubic: u.ubic, piso: u.piso, zp: u.zp, qty: t, cdDestino: destino, motivo: 'Stock de seguridad fuera de OSR', libera: false });
-      r.extraerOsr += t; r.ubMover++;
-      resta -= t;
-    }
+    const faltaExt = Math.min(faltaSS, Math.floor(enOsr * MAX_EXTRAER_OSR));
+    if (faltaExt) r.extraerOsr = extraer(r, x.porCd.get(osr), faltaExt, destino, 'Stock de seguridad fuera de OSR');
     r.ssDespues = enOsr ? fueraUni + r.extraerOsr : null;
     r.osrDespues = enOsr - r.extraerOsr;
     r.cubreSS = enOsr ? r.ssDespues >= ss : null;
-    r.estado = !enOsr ? ESTADOS_CONS.CONSOLIDAR : !fueraUni ? ESTADOS_CONS.SIN_SS : faltaSS ? ESTADOS_CONS.SS_BAJO : ESTADOS_CONS.CONS_OSR;
-    r.cdsDespues = [destino, ...(r.osrDespues > 0 ? [osr] : [])];
+    r.estado = enOsr ? (!fueraUni ? ESTADOS_CONS.SIN_SS : faltaSS ? ESTADOS_CONS.SS_BAJO : ESTADOS_CONS.CONS_OSR)
+      : r.desdeBuffer ? ESTADOS_CONS.BUFFER : vaEtq ? ESTADOS_CONS.ETQ : ESTADOS_CONS.CONSOLIDAR;
+    r.cdsDespues = [...new Set([destino, ...bufs.filter((e) => e.uni > 0).map((e) => e.cd), ...(r.osrDespues > 0 ? [osr] : [])])];
+    pickBuf.evitable += x.pickBuf;
     lista.push(r);
   }
   // primero lo que más vende (clase A), después lo que más ubicaciones libera
@@ -366,8 +418,8 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
 
   // balance por CD: SKU antes / después, unidades que salen / entran y ubicaciones que se liberan
   const bal = new Map(cds.map((cd) => [cd, { cd, skusAntes: 0, skusDespues: 0, sale: 0, entra: 0, ubLibera: 0 }]));
-  const despues = new Map([...sk.values()].map((x) => [x.sku, [...x.porCd.keys()]]));
-  for (const x of sk.values()) for (const cd of x.porCd.keys()) bal.get(cd).skusAntes++;
+  const despues = new Map(skus.map((x) => [x.sku, [...x.porCd.keys()]]));
+  for (const x of skus) for (const cd of x.porCd.keys()) bal.get(cd).skusAntes++;
   for (const r of lista) despues.set(r.sku, r.cdsDespues);
   for (const l of despues.values()) for (const cd of l) if (bal.has(cd)) bal.get(cd).skusDespues++;
   for (const m of movs) {
@@ -379,13 +431,15 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
 
   const porEstado = Object.values(ruta ? ESTADOS_RUTA : ESTADOS_CONS).map((estado) => {
     const l = lista.filter((r) => r.estado === estado);
-    return { estado, skus: l.length, uni: l.reduce((s, r) => s + r.uniMover + r.extraerOsr, 0) };
+    return { estado, skus: l.length, uni: l.reduce((s, r) => s + r.uniMover + r.extraerOsr + r.desdeBuffer, 0) };
   });
   const sum = (k) => lista.reduce((s, r) => s + r[k], 0);
   return {
-    carga, osr, cdPri, cds, cdsRuta: cds.filter((cd) => cd !== osr), ruta, primero, criterio: crit, criterios: CRITERIOS_CONS, diasSS: D, tot, porEstado, lista, movs,
-    resumen: { skus: lista.length, uniMover: sum('uniMover'), extraerOsr: sum('extraerOsr'), ubMover: sum('ubMover'), ubLibera: sum('ubLibera'),
-      noCubreSS: lista.filter((r) => r.cubreSS === false).length, quedanUno: lista.filter((r) => r.cdsDespues.length === 1).length },
+    carga, osr, cdPri, cds, cdsRuta: cds.filter((cd) => cd !== osr), ruta, primero, buffer, cdEtq, cdsEtq: cdsPick, umbral, tipo: tipoSel, tipos: TIPOS_PICK, porTipo,
+    hayPicking: pk.skus.size > 0, hayPedidos: pk.hayPedidos, pickBuf, criterio: crit, criterios: CRITERIOS_CONS, diasSS: D, tot, porEstado, lista, movs,
+    resumen: { skus: lista.length, uniMover: sum('uniMover'), extraerOsr: sum('extraerOsr'), desdeBuffer: sum('desdeBuffer'), ubMover: sum('ubMover'), ubLibera: sum('ubLibera'),
+      noCubreSS: lista.filter((r) => r.cubreSS === false).length, quedanUno: lista.filter((r) => r.cdsDespues.length === 1).length,
+      alEtq: lista.filter((r) => r.vaEtq).length, uniEtq: lista.filter((r) => r.vaEtq).reduce((s, r) => s + r.uniMover + r.desdeBuffer + r.extraerOsr, 0) },
     balance: [...bal.values()],
   };
 }
@@ -393,9 +447,41 @@ async function calcularConsolidacionCds({ criterio = 'unidades', diasSS = 7, des
 /** Simulación para la vista: totales, balance por CD y los primeros 500 SKU (filtrables por estado y clase). */
 export async function consolidacionCds(params = {}) {
   const { lista, movs, ...r } = await calcularConsolidacionCds(params);
-  const est = params.estado || '', abc = up(params.abc);
-  const sel = lista.filter((x) => (!est || x.estado === est) && (!abc || x.abc === abc));
-  return { ...r, filtrados: sel.length, detalle: sel.slice(0, 500), movimientos: movs.length };
+  const est = params.estado || '', abc = up(params.abc), dep = params.depto || '';
+  const filt = lista.filter((x) => (!est || x.estado === est) && (!abc || x.abc === abc));
+  const sel = dep ? filt.filter((x) => x.depto === dep) : filt;
+  if (params.orden) ordenarPor(sel, params.orden, params.dir);
+  const top = Math.min(500, Number(params.top) || 500);
+  return { ...r, depto: dep, filtrados: sel.length, detalle: sel.slice(0, top), movimientos: movs.length, porDepto: porDepto(filt) };
+}
+
+/** Orden de la tabla por SKU: clave de columna ("cd:CD1" = unidades en ese CD), asc o desc; los vacíos siempre al final. */
+function ordenarPor(l, k, dir) {
+  const s = dir === 'asc' ? 1 : -1;
+  const v = (x) => (k.startsWith('cd:') ? x.unidades[k.slice(3)] || 0 : x[k]);
+  l.sort((a, b) => {
+    const va = v(a), vb = v(b);
+    if (va === null || va === undefined) return vb === null || vb === undefined ? 0 : 1;
+    if (vb === null || vb === undefined) return -1;
+    return s * (typeof va === 'number' && typeof vb === 'number' ? va - vb : cmp(String(va), String(vb)));
+  });
+}
+
+/** Apertura por departamento de los SKU con acción: unidades por CD hoy, lo que se mueve y los estados. */
+function porDepto(lista) {
+  const m = new Map();
+  for (const x of lista) {
+    let d = m.get(x.depto);
+    if (!d) m.set(x.depto, d = { depto: x.depto, skus: 0, unidades: {}, total: 0, uniMover: 0, desdeBuffer: 0, extraerOsr: 0, ubMover: 0, ubLibera: 0,
+      alEtq: 0, pickBuf: 0, ventaDia: 0, tipos: {}, estados: {} });
+    d.skus++; d.total += x.total; d.uniMover += x.uniMover; d.desdeBuffer += x.desdeBuffer; d.extraerOsr += x.extraerOsr;
+    d.ubMover += x.ubMover; d.ubLibera += x.ubLibera; d.pickBuf += x.pickBuf; d.ventaDia += x.ventaDia;
+    if (x.vaEtq) d.alEtq++;
+    for (const [cd, u] of Object.entries(x.unidades)) d.unidades[cd] = (d.unidades[cd] || 0) + u;
+    d.tipos[x.tipoPick] = (d.tipos[x.tipoPick] || 0) + 1;
+    d.estados[x.estado] = (d.estados[x.estado] || 0) + 1;
+  }
+  return [...m.values()].sort((a, b) => b.uniMover + b.desdeBuffer + b.extraerOsr - (a.uniMover + a.desdeBuffer + a.extraerOsr) || cmp(a.depto, b.depto));
 }
 
 /** Reporte .xlsx con todos los SKU con acción, los movimientos sugeridos y el balance por CD. */
@@ -407,6 +493,9 @@ export async function archivoConsolidacionCds(params = {}) {
     ['Base de stock', fecha],
     ...(d.ruta ? [['Ruta simulada', `${d.ruta.desde} → ${d.ruta.hasta} (${d.ruta.soloEnDestino ? 'solo SKU que ya tienen stock en el destino' : 'todos los SKU del origen'})`]] : []),
     ['Criterio del CD destino', d.ruta ? 'No aplica (ruta fija)' : d.criterios[d.criterio]],
+    ['Tipo de picking', d.tipo ? d.tipos[d.tipo] : 'Todos'],
+    ['CD de etiqueta', d.cdEtq ? `${d.cdEtq} (SKU con picking de etiqueta o mixto${d.umbral > 0 ? `, y de tarea con ${Math.round(d.umbral * 100)}% o más de pedidos mixtos` : ''})` : 'Sin CD de etiqueta'],
+    ['CD buffer de reabastecimiento', d.buffer.length ? `${d.buffer.join(', ')} (no son destino; su stock queda como reserva y los SKU que solo están ahí reciben ${d.diasSS} días de venta en un CD de picking)` : '—'],
     ['Consolidación directa en', d.primero.length ? `${d.primero.join(', ')} (si el SKU tiene stock ahí, se consolida en ese CD antes que en cualquier otro)` : '—'],
     ['CD del OSR', d.osr],
     ['Stock de seguridad fuera de OSR', `${d.diasSS} días de venta (venta diaria = ventas 2 meses / ${DIAS_VENTAS}); de OSR se extrae como máximo el ${MAX_EXTRAER_OSR * 100}% de su stock`],
@@ -415,25 +504,32 @@ export async function archivoConsolidacionCds(params = {}) {
     [],
     ['SKU con acción', d.resumen.skus], ['Unidades a mover (consolidación)', d.resumen.uniMover], ['Unidades a extraer de OSR (stock de seguridad)', d.resumen.extraerOsr],
     ['Ubicaciones de origen (tareas)', d.resumen.ubMover], ['Ubicaciones que quedan libres', d.resumen.ubLibera],
+    ['Unidades a abastecer desde buffer', d.resumen.desdeBuffer], ['SKU que van al CD de etiqueta', d.resumen.alEtq],
     ['SKU de OSR que no alcanzan el stock de seguridad fuera', d.resumen.noCubreSS],
+    ['Unidades pickeadas desde buffer (archivo de picking)', d.pickBuf.total], ['De ellas, de SKU con CD de picking después del plan', d.pickBuf.evitable],
     [],
     ['Estado', 'SKU', 'Unidades a mover'], ...d.porEstado.map((e) => [e.estado, e.skus, e.uni]),
   ];
-  const porSku = [['SKU', 'Descripción', 'Depto', 'Clase', 'Venta/día', 'N° CD', ...d.cds.map((cd) => `Unid. ${cd}`), 'Total unidades', 'Ubicaciones',
-    'CD destino', 'Motivo destino', 'Unid. a mover', 'Ubic. a mover', 'Ubic. que se liberan', `Stock seg. requerido (${d.diasSS} d)`, 'Unid. a extraer de OSR',
+  const porSku = [['SKU', 'Descripción', 'Depto', 'Clase', 'Tipo picking', '% pedidos mixtos', 'Pickeado desde buffer', 'Venta/día', 'N° CD', ...d.cds.map((cd) => `Unid. ${cd}`), 'Total unidades', 'Ubicaciones',
+    'CD destino', 'Motivo destino', 'Unid. a mover', 'Unid. desde buffer', 'Ubic. a mover', 'Ubic. que se liberan', `Stock seg. requerido (${d.diasSS} d)`, 'Unid. a extraer de OSR',
     'Stock fuera de OSR después', 'Stock OSR después', 'Cubre stock seg.', 'CD después', 'Estado'],
-  ...d.lista.map((r) => [r.sku, r.desc, r.depto, r.matriz, Math.round(r.ventaDia * 100) / 100, r.nCds, ...d.cds.map((cd) => r.unidades[cd] || 0), r.total, r.nUb,
-    r.destino, r.motivoDestino, r.uniMover, r.ubMover, r.ubLibera, r.ss ?? '', r.extraerOsr, r.ssDespues ?? '', r.osr ? r.osrDespues : '',
+  ...d.lista.map((r) => [r.sku, r.desc, r.depto, r.matriz, d.tipos[r.tipoPick], Math.round(r.pctMixto * 1000) / 1000, r.pickBuf, Math.round(r.ventaDia * 100) / 100, r.nCds, ...d.cds.map((cd) => r.unidades[cd] || 0), r.total, r.nUb,
+    r.destino, r.motivoDestino, r.uniMover, r.desdeBuffer, r.ubMover, r.ubLibera, r.ss ?? '', r.extraerOsr, r.ssDespues ?? '', r.osr ? r.osrDespues : '',
     r.cubreSS === null ? '' : r.cubreSS ? 'Sí' : 'No', r.cdsDespues.join(' + '), r.estado])];
   const movs = [['SKU', 'Descripción', 'Clase', 'CD origen', 'Piso', 'Zona pasillo', 'Ubicación origen', 'Unidades', 'CD destino', 'Motivo', 'Libera ubicación'],
     ...d.movs.map((m) => [m.sku, m.desc, m.matriz, m.cdOrigen, m.piso, m.zp, m.ubic, m.qty, m.cdDestino, m.motivo, m.libera ? 'Sí' : 'No'])];
   const bal = [['CD', 'SKU antes', 'SKU después', 'Unidades que salen', 'Unidades que entran', 'Ubicaciones que se liberan'],
     ...d.balance.map((b) => [b.cd, b.skusAntes, b.skusDespues, b.sale, b.entra, b.ubLibera])];
+  const estDep = Object.values(d.ruta ? ESTADOS_RUTA : ESTADOS_CONS);
+  const dep = [['Depto', 'SKU con acción', 'Venta/día', ...Object.values(d.tipos).map((t) => `SKU ${t.toLowerCase()}`), 'Pickeado desde buffer', ...d.cds.map((cd) => `Unid. ${cd}`),
+    'Total unidades', 'Unid. a mover', 'Unid. desde buffer', 'Unid. a extraer de OSR', 'Ubic. a mover', 'Ubic. que se liberan', 'SKU al CD de etiqueta', ...estDep],
+  ...porDepto(d.lista).map((x) => [x.depto, x.skus, Math.round(x.ventaDia * 10) / 10, ...Object.keys(d.tipos).map((t) => x.tipos[t] || 0), x.pickBuf,
+    ...d.cds.map((cd) => x.unidades[cd] || 0), x.total, x.uniMover, x.desdeBuffer, x.extraerOsr, x.ubMover, x.ubLibera, x.alEtq, ...estDep.map((e) => x.estados[e] || 0)])];
   return {
     buffer: libro([['Resumen', resumen, [46, 60, 16]],
-      ['Por SKU', porSku, [16, 36, 18, 7, 10, 6, ...d.cds.map(() => 11), 12, 11, 10, 16, 12, 11, 14, 16, 16, 16, 14, 12, 14, 34]],
-      ['Movimientos', movs, [16, 36, 7, 10, 8, 12, 18, 10, 10, 30, 10]], ['Balance por CD', bal, [10, 11, 12, 18, 18, 24]]]),
-    nombre: `Consolidacion_CD_${d.ruta ? `${d.ruta.desde}_a_${d.ruta.hasta}_`.replace(/\s+/g, '') : ''}${fecha}.xlsx`,
+      ['Por SKU', porSku, [16, 36, 18, 7, 14, 10, 12, 10, 6, ...d.cds.map(() => 11), 12, 11, 10, 16, 12, 12, 11, 14, 16, 16, 16, 14, 12, 14, 34]],
+      ['Por depto', dep, [30, 10, 10]], ['Movimientos', movs, [16, 36, 7, 10, 8, 12, 18, 10, 10, 30, 10]], ['Balance por CD', bal, [10, 11, 12, 18, 18, 24]]]),
+    nombre: `Consolidacion_CD_${d.tipo ? d.tipo + '_' : ''}${d.ruta ? `${d.ruta.desde}_a_${d.ruta.hasta}_`.replace(/\s+/g, '') : ''}${fecha}.xlsx`,
   };
 }
 
