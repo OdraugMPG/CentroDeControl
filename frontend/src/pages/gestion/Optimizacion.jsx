@@ -31,154 +31,74 @@ function Generar({ etiqueta, total, onGenerar }) {
   );
 }
 
-const CLASES_OSR = ['AX', 'AY', 'BX', 'BY'];
-const LECTURA_ESTADO = {
-  REVISION: 'Están en OSR pero falta confirmar si son aptos. Confirmar primero los de clase A (más venta): si pasan a "Y", ya suman al automático.',
-  N: 'Están en OSR aunque no son aptos. Los de clase C (poca o ninguna venta) son los primeros a retirar: liberan espacio de OSR para SKU "Y" de alta rotación.',
-};
+const TONO_ESTADO = { 'Consolidar': '', 'Consolidar fuera de OSR': 'm-1', 'Sin stock de seguridad fuera de OSR': 'm-4', 'Stock de seguridad insuficiente': 'm-3',
+  'Consolidar en destino': 'm-0', 'Nuevo en destino': 'm-2' };
 
-/** SKU que hoy están almacenados en OSR sin Logística OSR = Y (REVISION, N u otro valor). */
-function NoAptosOsr({ grupos, osr }) {
-  const [sel, setSel] = useState(grupos[0]?.estado);
-  const g = grupos.find((x) => x.estado === sel) || grupos[0];
-  if (!g) return <p className="note">Todos los SKU con stock en {osr} tienen Logística OSR = "Y".</p>;
-  return (
-    <>
-      <div className="row spread" style={{ alignItems: 'center', margin: '18px 0 8px' }}>
-        <h3 style={{ margin: 0 }}>En {osr} sin Logística OSR = "Y"</h3>
-        <div className="chips">{grupos.map((x) => <button key={x.estado} className="chip" aria-pressed={x.estado === g.estado} onClick={() => setSel(x.estado)}>{x.estado} · {fmt(x.skus)} SKU</button>)}</div>
-      </div>
-      <p className="note" style={{ marginTop: 0 }}>{LECTURA_ESTADO[g.estado] || 'Valor de Logística OSR distinto de Y: revisar si corresponde que estén en OSR.'}</p>
-      <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,2fr) minmax(0,3fr)' }}>
-        <table>
-          <thead><tr><th>Clase</th><th className="num">SKU</th><th className="num">Unid. en {osr}</th><th className="num">Ubic. en {osr}</th></tr></thead>
-          <tbody>
-            {['A', 'B', 'C'].map((a) => (
-              <tr key={a}><td><span className={'pill ' + TONO[a]}>{a}</span></td><td className="num">{fmt(g.abc[a].skus)}</td><td className="num">{fmt(g.abc[a].uni)}</td><td className="num">{fmt(g.abc[a].ubic)}</td></tr>
-            ))}
-            <tr className="tot"><td>Total</td><td className="num">{fmt(g.skus)}</td><td className="num">{fmt(g.uni)}</td><td className="num">{fmt(g.ubic)}</td></tr>
-          </tbody>
-        </table>
-        <div className="grid-kpi" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', marginBottom: 0 }}>
-          <div className="kpi"><div className="k">Ubicaciones de {osr}</div><div className="v">{fmt(g.ubic)}</div><div className="n">ocupadas por SKU {g.estado}</div></div>
-          <div className={'kpi ' + (g.estado === 'N' ? 'warn' : '')}><div className="k">{g.estado === 'N' ? 'Liberables (clase C)' : 'Por confirmar (clase A)'}</div><div className="v">{fmt(g.estado === 'N' ? g.abc.C.ubic : g.abc.A.skus)}</div><div className="n">{g.estado === 'N' ? `ubicaciones de ${fmt(g.abc.C.skus)} SKU de baja venta` : `SKU de alta venta · todo el grupo ${g.estado} vende ${fmt(g.ventaDia, 0)} u./día`}</div></div>
-        </div>
-      </div>
-      <div className="tbl" style={{ maxHeight: 360, marginTop: 10 }}>
-        <table>
-          <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th>Depto</th><th className="num">Venta/día</th><th className="num">Stock {osr}</th><th className="num">Ubic. {osr}</th><th className="num">Cobertura</th><th className="num">Stock otros CD</th></tr></thead>
-          <tbody>{g.lista.map((x) => (
-            <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td><td>{x.depto}</td>
-              <td className="num">{fmt(x.ventaDia, 1)}</td><td className="num">{fmt(x.osr)}</td><td className="num">{fmt(x.ubOsr)}</td><td className="num">{x.cob === null ? 'sin venta' : `${fmt(x.cob, 0)} d`}</td><td className="num">{fmt(x.otros)}</td></tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {g.skus > g.lista.length && <p className="note">Se muestran {fmt(g.lista.length)} de {fmt(g.skus)} SKU (ordenados por venta diaria).</p>}
-    </>
-  );
-}
-
-/** Simulador de ingreso de alta rotación a OSR por días de cobertura. */
-function IngresoOsr({ onCola }) {
-  const [f, setF] = useState({ dias: 7, clases: ['AX', 'AY'], incluirSinOsr: false, skus: '' });
-  const [r, setR] = useState(null);
-  const [cargando, setCargando] = useState(false);
-  React.useEffect(() => {
-    setCargando(true);
-    const t = setTimeout(() => api.post('/api/optimizacion/osr/simular', f).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
-    return () => clearTimeout(t);
-  }, [JSON.stringify(f)]);
-  const set = (k) => (v) => setF({ ...f, [k]: v });
-  const alt = (c) => set('clases')(f.clases.includes(c) ? f.clases.filter((x) => x !== c) : [...f.clases, c]);
-  const generar = async () => {
-    try {
-      const x = await api.post('/api/optimizacion/osr/generar', f);
-      toast(`${fmt(x.tareas)} tareas en cola (${fmt(x.skus)} SKU) hacia ${x.destino}. Entran a la próxima asignación diaria.`);
-      onCola();
-    } catch (e) { toast(e.message, true); }
-  };
-  const pp = (x) => fmt(x * 100, 1) + '%';
-  return (
-    <div className="sec">
-      <h2>Ingreso de alta rotación a {r?.osr || 'OSR'}</h2>
-      <p className="note" style={{ marginTop: -4 }}>SKU con Logística OSR = "Y" que ya tienen almacenamiento en {r?.osr || 'OSR'}: se sugiere ingresar desde los otros CD lo necesario para cubrir N días de venta (venta diaria = ventas de 2 meses / 60). Más clase A en OSR = más venta atendida por el automático y menos picking manual.</p>
-      {r && !r.hayCol && <div className="alert warn">La Base cargada no trae la columna "Logística OSR": por ahora se consideran todos los SKU como aptos. Vuelve a cargar la Base en Asignación del día para filtrar por "Y".</div>}
-      {r && !r.existeOsr && <div className="alert warn">No hay stock en {r.osr} en la Base. Revisa el parámetro "CD del OSR" en Configuración.</div>}
-      <div className="row" style={{ margin: '10px 0 14px' }}>
-        <div><label className="lbl" htmlFor="o-d">Días de cobertura</label><input id="o-d" type="number" className="w90" min="1" value={f.dias} onChange={(e) => set('dias')(e.target.value)} /></div>
-        <div><span className="lbl">Clases</span><div className="chips">{CLASES_OSR.map((c) => <button key={c} className="chip" aria-pressed={f.clases.includes(c)} onClick={() => alt(c)}>{c}</button>)}</div></div>
-        <div><label className="lbl" htmlFor="o-s">Máx. SKU</label><input id="o-s" type="number" className="w90" min="1" placeholder="todos" value={f.skus} onChange={(e) => set('skus')(e.target.value)} /></div>
-        <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.incluirSinOsr} onChange={(e) => set('incluirSinOsr')(e.target.checked)} /> Incluir aptos que aún no están en OSR</label>
-        {cargando && <span className="note">Simulando…</span>}
-      </div>
-      {r && (
-        <>
-          <div className="grid-kpi">
-            <div className="kpi good"><div className="k">Clase A dentro de {r.osr} (unidades)</div><div className="v">{pp(r.pctA.antes)} → {pp(r.pctA.despues)}</div><div className="n">participación de la clase A en el stock de {r.osr}</div></div>
-            <div className="kpi good"><div className="k">Venta A atendible desde {r.osr}</div><div className="v">{pp(r.atendidaA.antes / (r.atendidaA.ventaA || 1))} → {pp(r.atendidaA.despues / (r.atendidaA.ventaA || 1))}</div><div className="n">{fmt(r.atendidaA.antes)} → {fmt(r.atendidaA.despues)} u./día de {fmt(r.atendidaA.ventaA)} u./día de venta A</div></div>
-            <div className="kpi"><div className="k">A ingresar</div><div className="v">{fmt(r.unidades)} u.</div><div className="n">{fmt(r.skus)} SKU desde {fmt(r.ubicaciones)} ubicaciones · {r.porCd.map((c) => `${c.cd} ${fmt(c.unidades)}`).join(' · ') || '—'}</div></div>
-            <div className="kpi"><div className="k">Picking manual que se evita</div><div className="v">{fmt(r.ahorro.operarios, 1)}</div><div className="n">operarios-turno/día · {fmt(r.ahorro.unidadesDia)} u./día ÷ {fmt(r.ahorro.pickUnHH)} u./HH (estimación)</div></div>
-          </div>
-          <div className="row spread" style={{ marginBottom: 8 }}>
-            <p className="note" style={{ margin: 0 }}>{fmt(r.aptos)} SKU aptos para OSR, {fmt(r.aptosEnOsr)} ya con stock en {r.osr}. {fmt(r.candidatos)} necesitan ingreso para cubrir {r.dias} días.</p>
-            <button className="btn primary" disabled={!r.skus} onClick={generar}>Generar ingreso a {r.osr} ({fmt(r.ubicaciones)} tareas)</button>
-          </div>
-          <div className="tbl" style={{ maxHeight: 400 }}>
-            <table>
-              <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th><th className="num">Stock {r.osr}</th><th className="num">Cobertura hoy</th><th className="num">Ingresar</th><th className="num">Cobertura después</th><th className="num">Stock otros CD</th><th>Desde (CD · ubicación · unidades a extraer)</th></tr></thead>
-              <tbody>{r.detalle.map((x) => (
-                <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td>
-                  <td className="num">{fmt(x.ventaDia, 1)}</td><td className="num">{fmt(x.osr)}</td><td className="num">{fmt(x.cobAntes, 1)} d</td>
-                  <td className="num"><b>{fmt(x.unidades)}</b></td><td className="num">{fmt(x.cobDespues, 1)} d</td><td className="num">{fmt(x.otros)}</td>
-                  <td className="desde">{x.desde.map((t) => <div key={t.cd + t.ubic}><span className="muted">{t.cd}</span> <span className="mono">{t.ubic}</span> <b>{fmt(t.qty)} u.</b></div>)}</td></tr>
-              ))}</tbody>
-            </table>
-          </div>
-          {r.skus > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.skus)} SKU (ordenados por venta diaria).</p>}
-          {r.hayCol && <NoAptosOsr grupos={r.noAptos} osr={r.osr} />}
-        </>
-      )}
-    </div>
-  );
-}
-
-const TONO_ESTADO = { 'Consolidar': '', 'Consolidar fuera de OSR': 'm-1', 'Sin stock de seguridad fuera de OSR': 'm-4', 'Stock de seguridad insuficiente': 'm-3' };
-
-/** SKU repartidos en varios CD: simulación para dejarlos en un solo CD, con stock de seguridad fuera de OSR. */
+/** SKU repartidos en varios CD: simulación para dejarlos en un solo CD, con stock de seguridad fuera de OSR, o de una ruta Desde → Hasta. */
 function ConsolidacionCds() {
-  const [f, setF] = useState({ criterio: 'unidades', diasSS: 7, estado: '', abc: '' });
+  const [f, setF] = useState({ criterio: 'unidades', diasSS: 7, estado: '', abc: '', desde: '', hasta: '', soloEnDestino: true });
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
+  // la ruta se simula solo con los dos CD elegidos; mientras falte uno, sigue la consolidación general
+  const enRuta = !!(f.desde && f.hasta && f.desde !== f.hasta);
+  const cuerpo = { ...f, desde: enRuta ? f.desde : '', hasta: enRuta ? f.hasta : '' };
   React.useEffect(() => {
     setCargando(true);
-    const t = setTimeout(() => api.post('/api/optimizacion/consolidacion/simular', f).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
+    const t = setTimeout(() => api.post('/api/optimizacion/consolidacion/simular', cuerpo).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
     return () => clearTimeout(t);
-  }, [JSON.stringify(f)]);
+  }, [JSON.stringify(cuerpo)]);
   const set = (k) => (v) => setF({ ...f, [k]: v });
   const alt = (k, v) => set(k)(f[k] === v ? '' : v);
+  // al cambiar la ruta cambian los estados posibles: se limpia el filtro de estado
+  const setRuta = (k) => (v) => setF({ ...f, [k]: v, estado: '', ...(k === 'desde' && v === f.hasta ? { hasta: '' } : {}) });
   const osr = r?.osr || 'OSR';
+  const ruta = r?.ruta;
   return (
     <div className="sec">
       <div className="row spread" style={{ marginBottom: 6 }}>
-        <h2 style={{ margin: 0 }}>Consolidación de SKU entre CD</h2>
-        <a className="btn primary" href={urlApi('/api/optimizacion/consolidacion/excel' + qs({ criterio: f.criterio, diasSS: f.diasSS }))}>Exportar a Excel</a>
+        <h2 style={{ margin: 0 }}>Consolidación de SKU entre CD{ruta ? ` · ruta ${ruta.desde} → ${ruta.hasta}` : ''}</h2>
+        <a className="btn primary" href={urlApi('/api/optimizacion/consolidacion/excel' + qs({ criterio: f.criterio, diasSS: f.diasSS, desde: cuerpo.desde, hasta: cuerpo.hasta, soloEnDestino: f.soloEnDestino }))}>Exportar a Excel</a>
       </div>
-      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más CD y simulación para dejarlos en un solo CD. El stock en {osr} se mantiene, pero cada SKU de {osr} debe tener stock de seguridad fuera de {osr} (días de venta) en un único CD; si no lo tiene, se propone extraer la diferencia desde {osr} (como máximo la mitad de su stock, para no vaciar el automático). El Excel trae todos los SKU, los movimientos por ubicación y el balance por CD.</p>
-      <div className="row" style={{ margin: '10px 0 14px' }}>
-        <div><label className="lbl" htmlFor="c-cr">CD destino</label>
-          <select id="c-cr" value={f.criterio} onChange={(e) => set('criterio')(e.target.value)}>
-            {Object.entries(r?.criterios || { unidades: 'CD con más unidades (menos movimiento)' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select></div>
-        <div><label className="lbl" htmlFor="c-ss">Stock de seguridad fuera de {osr} (días)</label><input id="c-ss" type="number" className="w90" min="0" value={f.diasSS} onChange={(e) => set('diasSS')(e.target.value)} /></div>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más CD y simulación para dejarlos en un solo CD. El stock en {osr} se mantiene, pero cada SKU de {osr} debe tener stock de seguridad fuera de {osr} (días de venta) en un único CD; si no lo tiene, se propone extraer la diferencia desde {osr} (como máximo la mitad de su stock, para no vaciar el automático).{r?.primero?.length > 0 && ` Si el SKU tiene stock en ${r.primero.join(' o ')}, se consolida ahí directamente (parámetro en Configuración).`} El Excel trae todos los SKU, los movimientos por ubicación y el balance por CD.</p>
+      <div className="row cons-ctrl" style={{ margin: '10px 0 14px', alignItems: 'flex-end' }}>
+        <fieldset className="cons-ruta">
+          <legend className="lbl">Simular ruta</legend>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div><label className="lbl" htmlFor="c-de">Desde</label>
+              <select id="c-de" value={f.desde} onChange={(e) => setRuta('desde')(e.target.value)}>
+                <option value="">Todos los CD</option>
+                {(r?.cdsRuta || []).map((cd) => <option key={cd} value={cd}>{cd}</option>)}
+              </select></div>
+            <span className="cons-flecha" aria-hidden="true">→</span>
+            <div><label className="lbl" htmlFor="c-a">Hasta</label>
+              <select id="c-a" value={f.hasta} onChange={(e) => setRuta('hasta')(e.target.value)} disabled={!f.desde}>
+                <option value="">{f.desde ? 'Elegir CD' : '—'}</option>
+                {(r?.cdsRuta || []).filter((cd) => cd !== f.desde).map((cd) => <option key={cd} value={cd}>{cd}</option>)}
+              </select></div>
+            {enRuta && <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.soloEnDestino} onChange={(e) => set('soloEnDestino')(e.target.checked)} /> Solo SKU que ya tienen stock en {f.hasta}</label>}
+            {f.desde && <button className="btn sm" onClick={() => setF({ ...f, desde: '', hasta: '', estado: '' })}>Quitar ruta</button>}
+          </div>
+        </fieldset>
+        {!enRuta && <>
+          <div><label className="lbl" htmlFor="c-cr">CD destino</label>
+            <select id="c-cr" value={f.criterio} onChange={(e) => set('criterio')(e.target.value)}>
+              {Object.entries(r?.criterios || { unidades: 'CD con más unidades (menos movimiento)' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select></div>
+          <div><label className="lbl" htmlFor="c-ss">Stock de seguridad fuera de {osr} (días)</label><input id="c-ss" type="number" className="w90" min="0" value={f.diasSS} onChange={(e) => set('diasSS')(e.target.value)} /></div>
+        </>}
         {cargando && <span className="note">Simulando…</span>}
       </div>
+      {f.desde && !enRuta && <p className="note" style={{ marginTop: -6 }}>Elige el CD de destino para simular la ruta. Mientras tanto se muestra la consolidación general.</p>}
+      {ruta && <p className="note" style={{ marginTop: -6 }}>Ruta: todo el stock de cada SKU en {ruta.desde} se mueve a {ruta.hasta}{ruta.soloEnDestino ? `, solo para los SKU que ya tienen stock en ${ruta.hasta}` : `, incluidos los SKU que hoy no están en ${ruta.hasta}`}. Los demás CD no se tocan; no aplican el criterio de destino ni la regla de prioridad.</p>}
       {r && (
         <>
           <div className="grid-kpi">
             <div className="kpi"><div className="k">SKU en 2 o más CD</div><div className="v">{fmt(r.tot.dispersos)}</div><div className="n">de {fmt(r.tot.skus)} SKU con stock · {fmt(r.tot.unCd)} ya en un solo CD</div></div>
-            <div className="kpi good"><div className="k">A consolidar</div><div className="v">{fmt(r.resumen.uniMover)} u.</div><div className="n">{fmt(r.resumen.skus)} SKU · {fmt(r.resumen.ubMover)} ubicaciones de origen</div></div>
-            <div className="kpi good"><div className="k">Ubicaciones que se liberan</div><div className="v">{fmt(r.resumen.ubLibera)}</div><div className="n">quedan vacías al sacar el SKU</div></div>
-            <div className={'kpi ' + (r.resumen.extraerOsr ? 'warn' : '')}><div className="k">Stock de seguridad desde {osr}</div><div className="v">{fmt(r.resumen.extraerOsr)} u.</div><div className="n">a mover al CD de respaldo · {fmt(r.resumen.noCubreSS)} SKU de {osr} siguen sin cubrir {r.diasSS} días fuera (falta reposición)</div></div>
+            <div className="kpi good"><div className="k">{ruta ? `A mover ${ruta.desde} → ${ruta.hasta}` : 'A consolidar'}</div><div className="v">{fmt(r.resumen.uniMover)} u.</div><div className="n">{fmt(r.resumen.skus)} SKU · {fmt(r.resumen.ubMover)} ubicaciones de origen</div></div>
+            <div className="kpi good"><div className="k">Ubicaciones que se liberan{ruta ? ` en ${ruta.desde}` : ''}</div><div className="v">{fmt(r.resumen.ubLibera)}</div><div className="n">quedan vacías al sacar el SKU</div></div>
+            {ruta
+              ? <div className="kpi"><div className="k">Quedan en un solo CD</div><div className="v">{fmt(r.resumen.quedanUno)}</div><div className="n">de {fmt(r.resumen.skus)} SKU de la ruta · el resto sigue también en otros CD</div></div>
+              : <div className={'kpi ' + (r.resumen.extraerOsr ? 'warn' : '')}><div className="k">Stock de seguridad desde {osr}</div><div className="v">{fmt(r.resumen.extraerOsr)} u.</div><div className="n">a mover al CD de respaldo · {fmt(r.resumen.noCubreSS)} SKU de {osr} siguen sin cubrir {r.diasSS} días fuera (falta reposición)</div></div>}
           </div>
           <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)' }}>
             <table>
@@ -203,12 +123,15 @@ function ConsolidacionCds() {
           </div>
           <div className="tbl" style={{ maxHeight: 420 }}>
             <table>
-              <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th><th>Unidades por CD hoy</th><th className="num">Total</th><th>CD destino</th><th className="num">Mover</th><th className="num">Libera</th><th className="num">SS req.</th><th className="num">Extraer de {osr}</th><th className="num">Fuera de {osr} después</th><th>Estado</th></tr></thead>
+              <thead>
+                <tr><th colSpan={4} /><th colSpan={r.cds.length + 1} className="grp">Unidades por CD hoy</th><th colSpan={7} /></tr>
+                <tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th>{r.cds.map((cd) => <th key={cd} className="num">{cd}</th>)}<th className="num">Total</th><th>CD destino</th><th className="num">Mover</th><th className="num">Libera</th><th className="num">SS req.</th><th className="num">Extraer de {osr}</th><th className="num">Fuera de {osr} después</th><th>Estado</th></tr></thead>
               <tbody>{r.detalle.map((x) => (
                 <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td>
                   <td className="num">{fmt(x.ventaDia, 1)}</td>
-                  <td className="desde">{Object.entries(x.unidades).map(([cd, u]) => <div key={cd}><span className={cd === x.destino ? '' : 'muted'}>{cd}</span> <b>{fmt(u)}</b></div>)}</td>
-                  <td className="num">{fmt(x.total)}</td><td><b>{x.destino}</b>{x.osrDespues > 0 && <span className="muted"> + {osr}</span>}</td>
+                  {r.cds.map((cd) => <td key={cd} className={'num' + (cd === x.destino ? ' cons-dest' : '')} title={cd === x.destino ? 'CD destino' : undefined}>{x.unidades[cd] ? fmt(x.unidades[cd]) : <span className="muted">—</span>}</td>)}
+                  <td className="num">{fmt(x.total)}</td>
+                  <td><b>{x.destino}</b>{x.osrDespues > 0 && <span className="muted"> + {osr}</span>}<div className="note" style={{ margin: 0 }}>{x.motivoDestino}</div></td>
                   <td className="num">{fmt(x.uniMover)}</td><td className="num">{fmt(x.ubLibera)}</td>
                   <td className="num">{x.ss === null ? '—' : fmt(x.ss)}</td><td className="num">{x.extraerOsr ? <b>{fmt(x.extraerOsr)}</b> : '—'}</td>
                   <td className="num" style={x.cubreSS === false ? { color: 'var(--bad)' } : undefined} title={x.cubreSS === false ? 'No alcanza el stock de seguridad' : undefined}>{x.ssDespues === null ? '—' : fmt(x.ssDespues)}</td>
@@ -217,6 +140,104 @@ function ConsolidacionCds() {
             </table>
           </div>
           {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU (clase A primero, por venta diaria). El Excel trae todos.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+const TONO_INT = { 'Queda en 1 ubicación': 'm-0', 'Consolidación parcial': 'm-2', 'No consolidable': 'm-4' };
+
+/** SKU repartidos en varias ubicaciones de un mismo CD: simulación con el mismo motor de la asignación diaria. */
+function ConsolidacionInterna() {
+  const [f, setF] = useState({ cd: '', piso: '', estado: '', abc: '' });
+  const [r, setR] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  React.useEffect(() => {
+    setCargando(true);
+    const t = setTimeout(() => api.post('/api/optimizacion/interna/simular', f).then(setR).catch((e) => toast(e.message, true)).finally(() => setCargando(false)), 250);
+    return () => clearTimeout(t);
+  }, [JSON.stringify(f)]);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const alt = (k, v) => set(k)(f[k] === v ? '' : v);
+  const ambito = r ? `${r.cd}${r.piso ? ' · ' + r.piso : ''}` : '';
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>Consolidación de SKU dentro del CD{r ? ` · ${ambito}` : ''}</h2>
+        <a className="btn primary" href={urlApi('/api/optimizacion/interna/excel' + qs({ cd: r?.cd || f.cd, piso: f.piso }))}>Exportar a Excel</a>
+      </div>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en 2 o más ubicaciones del mismo CD y simulación para juntarlos, con la misma regla de la asignación diaria: se mueve una ubicación completa que guarda un solo SKU a otra ubicación del mismo SKU, en la misma zona y con espacio (capacidad de referencia = la ubicación con más unidades). Cada movimiento libera una ubicación. Las ubicaciones reservadas{r ? ` (${fmt(r.reservadas)})` : ''} no se consideran. El Excel trae todos los SKU, los movimientos por ubicación y el balance por piso.</p>
+      <div className="row cons-ctrl" style={{ margin: '10px 0 14px', alignItems: 'flex-end' }}>
+        <fieldset className="cons-ruta">
+          <legend className="lbl">Simular en</legend>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div><label className="lbl" htmlFor="i-cd">CD</label>
+              <select id="i-cd" value={r?.cd || f.cd} onChange={(e) => setF({ ...f, cd: e.target.value, piso: '', estado: '' })}>
+                {(r?.cds || []).map((cd) => <option key={cd} value={cd}>{cd}</option>)}
+              </select></div>
+            <span className="cons-flecha" aria-hidden="true">›</span>
+            <div><label className="lbl" htmlFor="i-pi">Piso</label>
+              <select id="i-pi" value={f.piso} onChange={(e) => setF({ ...f, piso: e.target.value, estado: '' })}>
+                <option value="">Todos los pisos</option>
+                {(r?.pisos || []).map((pi) => <option key={pi} value={pi}>{pi}</option>)}
+              </select></div>
+            {f.piso && <button className="btn sm" onClick={() => setF({ ...f, piso: '', estado: '' })}>Quitar piso</button>}
+          </div>
+        </fieldset>
+        {cargando && <span className="note">Simulando…</span>}
+      </div>
+      {r && (
+        <>
+          <div className="grid-kpi">
+            <div className="kpi"><div className="k">SKU en 2 o más ubicaciones</div><div className="v">{fmt(r.tot.repartidos)}</div><div className="n">de {fmt(r.tot.skus)} SKU con stock en {r.cd} · {fmt(r.tot.unaUb)} ya en una sola ubicación</div></div>
+            <div className="kpi good"><div className="k">A consolidar en {ambito}</div><div className="v">{fmt(r.resumen.uniMover)} u.</div><div className="n">{fmt(r.porEstado.filter((e) => e.estado !== 'No consolidable').reduce((s, e) => s + e.skus, 0))} SKU · {fmt(r.resumen.movimientos)} movimientos</div></div>
+            <div className="kpi good"><div className="k">Ubicaciones que se liberan</div><div className="v">{fmt(r.resumen.ubLibera)}</div><div className="n">una por movimiento: la ubicación de origen queda vacía</div></div>
+            <div className="kpi"><div className="k">Quedan en 1 ubicación</div><div className="v">{fmt(r.resumen.quedanUna)}</div><div className="n">de {fmt(r.resumen.skus)} SKU repartidos · el resto queda en menos ubicaciones o no se puede juntar</div></div>
+          </div>
+          <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)' }}>
+            <table>
+              <thead><tr><th>Piso</th><th className="num">SKU repartidos</th><th className="num">Movimientos</th><th className="num">Unid. a mover</th><th className="num">Ubic. liberadas</th></tr></thead>
+              <tbody>
+                {r.balance.map((b) => (
+                  <tr key={b.piso}><td><b>{b.piso}</b></td><td className="num">{fmt(b.skus)}</td><td className="num">{fmt(b.movimientos)}</td><td className="num">{fmt(b.uni)}</td><td className="num">{fmt(b.ubLibera)}</td></tr>
+                ))}
+                {r.balance.length > 1 && <tr className="tot"><td>Total</td><td /><td className="num">{fmt(r.resumen.movimientos)}</td><td className="num">{fmt(r.resumen.uniMover)}</td><td className="num">{fmt(r.resumen.ubLibera)}</td></tr>}
+              </tbody>
+            </table>
+            <table>
+              <thead><tr><th>Estado</th><th className="num">SKU</th><th className="num">Unid. a mover</th></tr></thead>
+              <tbody>{r.porEstado.map((e) => (
+                <tr key={e.estado}><td><span className={'pill ' + TONO_INT[e.estado]}>{e.estado}</span></td><td className="num">{fmt(e.skus)}</td><td className="num">{fmt(e.uni)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div className="row spread" style={{ margin: '14px 0 8px' }}>
+            <div className="chips">
+              {r.porEstado.filter((e) => e.skus).map((e) => <button key={e.estado} className="chip" aria-pressed={f.estado === e.estado} onClick={() => alt('estado', e.estado)}>{e.estado} · {fmt(e.skus)}</button>)}
+            </div>
+            <div className="chips">{['A', 'B', 'C'].map((a) => <button key={a} className="chip" aria-pressed={f.abc === a} onClick={() => alt('abc', a)}>Clase {a}</button>)}</div>
+          </div>
+          <div className="tbl" style={{ maxHeight: 420 }}>
+            <table>
+              <thead>
+                <tr><th colSpan={4} /><th colSpan={r.pisos.length + 1} className="grp">Unidades por piso hoy</th><th colSpan={6} /></tr>
+                <tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Venta/día</th>{r.pisos.map((pi) => <th key={pi} className="num">{pi}</th>)}<th className="num">Total</th>
+                  <th className="num">Ubic. antes</th><th className="num">Movim.</th><th className="num">Mover</th><th className="num">Ubic. después</th><th>Ubicaciones destino</th><th>Estado</th></tr>
+              </thead>
+              <tbody>{r.detalle.map((x) => (
+                <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td><td className="wrap">{x.desc}</td>
+                  <td className="num">{fmt(x.ventaDia, 1)}</td>
+                  {r.pisos.map((pi) => <td key={pi} className={'num' + (r.piso === pi ? ' cons-dest' : '')}>{x.porPiso[pi] ? fmt(x.porPiso[pi]) : <span className="muted">—</span>}</td>)}
+                  <td className="num">{fmt(x.total)}</td>
+                  <td className="num">{fmt(x.nUb)}</td><td className="num">{x.nMov ? fmt(x.nMov) : '—'}</td><td className="num">{x.uniMover ? <b>{fmt(x.uniMover)}</b> : '—'}</td>
+                  <td className="num">{fmt(x.ubDespues)}</td>
+                  <td className="mono note">{x.destinos.slice(0, 3).join(', ')}{x.destinos.length > 3 ? ` +${x.destinos.length - 3}` : ''}</td>
+                  <td><span className={'pill ' + TONO_INT[x.estado]}>{x.estado}</span>{x.motivo && <div className="note" style={{ margin: 0 }}>{x.motivo}</div>}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU (clase A primero, por movimientos). El Excel trae todos.</p>}
         </>
       )}
     </div>
@@ -334,9 +355,9 @@ export default function Optimizacion({ irA }) {
         </div>
       </div>
 
-      <IngresoOsr onCola={rec} />
-
       <ConsolidacionCds />
+
+      <ConsolidacionInterna />
 
       <div className="viz-row">
         <div className="sec">

@@ -2,6 +2,23 @@ import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha, hora, PROC } from './api.js';
 import { Subir, toast, useCarga } from './ui.jsx';
 
+// [proceso, nombre, medida]: inventario se mide en ubicaciones a contar; el resto en unidades a mover
+const PROCS = [['INV', 'Inventario', 'ubicaciones'], ['CONS', 'Consolidación', 'unidades'], ['SU', 'Stock unitario', 'unidades'], ['SM', 'Slow moving', 'unidades'], ['REU', 'Reubicación ABC', 'unidades']];
+const AYUDA = {
+  INV: 'ubicaciones a contar de las zonas del ciclo.',
+  CONS: 'unidades a mover para juntar un SKU repartido en varias ubicaciones; cada movimiento libera una ubicación.',
+  SU: 'SKU con 1 unidad en 1 ubicación que se llevan a las ubicaciones reservadas.',
+  SM: 'unidades sin venta que van a la zona de slow moving.',
+  REU: 'unidades de alta rotación que se acercan al CD prioritario o al OSR.',
+};
+
+/** Cantidad asignada (ubicaciones o unidades) y, debajo, el número de tareas. */
+function Celda({ x, total }) {
+  const cls = 'num' + (total ? ' pub-total' : '');
+  if (!x.n) return <td className={cls}><span className="pub-vacio">—</span></td>;
+  return <td className={cls}><div className="pub-v">{fmt(x.u)}</div><div className="pub-n">{fmt(x.n)} {x.n === 1 ? 'tarea' : 'tareas'}</div></td>;
+}
+
 export default function Hoy({ fecha, irA }) {
   const [est, err, recargar] = useCarga(() => api.get('/api/estado' + qs({ fecha })), [fecha]);
   const [plan] = useCarga(() => api.get('/api/plan' + qs({ fecha })), [fecha, est?.asignacion?.id]);
@@ -38,6 +55,11 @@ export default function Hoy({ fecha, irA }) {
   const inicio = est.cargas.find((c) => c.tipo === 'INICIO');
   const a = est.asignacion;
   const activos = est.cds.filter((c) => c.activo);
+  const sumar = (cd, turno, proceso) => est.conteos.filter((x) => x.cd === cd && (turno === null || x.turno === turno) && x.proceso === proceso)
+    .reduce((s, x) => ({ n: s.n + x.n, u: s.u + x.u, sd: s.sd + x.sd }), { n: 0, u: 0, sd: 0 });
+  const sinDestinoSU = activos.map((c) => ({ cd: c.cd, sd: sumar(c.cd, null, 'SU').sd })).filter((x) => x.sd > 0);
+  // solo los procesos con tareas (o pendientes sin destino) hoy, en el mismo orden para todos los CD
+  const procsHoy = PROCS.filter(([p]) => est.conteos.some((x) => x.proceso === p && (x.n || x.sd)));
   const alertas = (a?.log || []).filter((l) => l.tipo !== 'INFO');
   return (
     <>
@@ -94,26 +116,51 @@ export default function Hoy({ fecha, irA }) {
               <h2 style={{ margin: 0 }}>Tareas publicadas</h2>
               <a className="btn" href={urlApi('/api/archivos/wms' + qs({ fecha }))}>Descargar archivo para el WMS</a>
             </div>
-            <div className="cards">
-              {(a.resumen || []).map((c) => (
-                <div className="card" key={c.cd}>
-                  <h3>{c.cd}</h3>
-                  <table>
-                    <thead><tr><th>Turno</th><th className="num">Inv.</th><th className="num">Cons.</th><th className="num">SU</th><th className="num">SM</th><th className="num">Reub.</th><th></th></tr></thead>
-                    <tbody>
-                      {c.turnos.map((t) => (
-                        <tr key={t.turno}>
-                          <td>T{t.turno}<div className="note">{t.supervisor}</div></td>
-                          <td className="num">{t.INV || '—'}</td><td className="num">{t.CONS || '—'}</td><td className="num">{t.SU || '—'}</td><td className="num">{t.SM || '—'}</td><td className="num">{t.REU || '—'}</td>
-                          <td><a className="btn sm" href={urlApi('/api/archivos/turno' + qs({ fecha, cd: c.cd, turno: t.turno }))} title="Archivo .xlsx del supervisor">.xlsx</a></td>
+            {sinDestinoSU.length > 0 && (
+              <div className="alert warn">
+                <b>{fmt(sinDestinoSU.reduce((s, x) => s + x.sd, 0))} SKU de stock unitario sin publicar</b> ({sinDestinoSU.map((x) => `${x.cd} ${fmt(x.sd)}`).join(' · ')}): no hay cupo en las ubicaciones reservadas de su piso.
+                Amplía las reservadas en <button className="link" onClick={() => irA('config')}>Configuración</button> y vuelve a generar la asignación.
+              </div>
+            )}
+            <div className="pub-cards">
+              {(a.resumen || []).map((c) => {
+                const total = procsHoy.reduce((s, [p]) => s + sumar(c.cd, null, p).n, 0);
+                return (
+                  <div className="pub-card" key={c.cd}>
+                    <div className="pub-head"><h3>{c.cd}</h3><span className="note">{fmt(total)} tareas</span></div>
+                    <table className="pub">
+                      <thead>
+                        <tr>
+                          <th>Proceso</th>
+                          {c.turnos.map((t) => (
+                            <th key={t.turno} className="num">
+                              <div className="pub-turno">T{t.turno} <a href={urlApi('/api/archivos/turno' + qs({ fecha, cd: c.cd, turno: t.turno }))} title={`Archivo .xlsx de ${t.supervisor}`}>.xlsx</a></div>
+                              <div className="pub-sup">{t.supervisor}</div>
+                            </th>
+                          ))}
+                          <th className="num pub-total">Total</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+                      </thead>
+                      <tbody>
+                        {procsHoy.map(([p, nombre, med]) => {
+                          const tot = sumar(c.cd, null, p);
+                          return (
+                            <tr key={p}>
+                              <td><div className="pub-proc">{nombre}</div><div className="pub-med">{med}{tot.sd > 0 && <span className="pub-sd" title="Sin cupo en ubicaciones reservadas: no se publicaron">{fmt(tot.sd)} sin destino</span>}</div></td>
+                              {c.turnos.map((t) => <Celda key={t.turno} x={sumar(c.cd, t.turno, p)} />)}
+                              <Celda x={tot} total />
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
             </div>
-            <p className="note">Inventario cuenta zonas; consolidación cuenta movimientos (cada uno libera una ubicación); stock unitario y slow moving cuentan líneas.</p>
+            <dl className="pub-leyenda">
+              {procsHoy.map(([p, nombre]) => <div key={p}><dt>{nombre}</dt><dd>{AYUDA[p]}</dd></div>)}
+            </dl>
           </div>
 
           <div className="sec">

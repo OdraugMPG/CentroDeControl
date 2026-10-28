@@ -13,6 +13,8 @@ import Cierre from './Cierre.jsx';
 import Slow from './Slow.jsx';
 import AbcXyz from './AbcXyz.jsx';
 import Optimizacion from './Optimizacion.jsx';
+import AbastecimientoOsr from './AbastecimientoOsr.jsx';
+import ParticipacionCd from './ParticipacionCd.jsx';
 import Config from './Config.jsx';
 import './gestion.css';
 
@@ -20,7 +22,7 @@ import './gestion.css';
 const VISTAS_GD = [
   ['', Hoy, 'gd.asignacion'], ['tareas', Tareas, 'gd.tareas'], ['conciliacion', Conciliacion, 'gd.conciliacion'],
   ['turno', MiTurno, 'gd.turno'], ['cierre', Cierre, 'gd.cierre'], ['slow', Slow, 'gd.slow'], ['abc', AbcXyz, 'gd.abc'],
-  ['optimizacion', Optimizacion, 'gd.optimizacion'], ['config', Config, 'gd.config']
+  ['optimizacion', Optimizacion, 'gd.optimizacion'], ['osr', AbastecimientoOsr, 'gd.osr'], ['participacion', ParticipacionCd, 'gd.participacion'], ['config', Config, 'gd.config']
 ];
 // Nombres de las vistas en el proyecto original (para irA)
 const ALIAS = { hoy: '', opt: 'optimizacion' };

@@ -9,7 +9,7 @@ export const PERMISOS = [
   ['Gestión diaria', [
     ['gd.asignacion', 'Asignación del día (Base de stock)'], ['gd.tareas', 'Tareas'], ['gd.conciliacion', 'Conciliación'],
     ['gd.turno', 'Mi turno'], ['gd.cierre', 'Cierre por tareas'], ['gd.slow', 'Slow moving'], ['gd.abc', 'ABC / XYZ'],
-    ['gd.optimizacion', 'Optimización ABC'], ['gd.config', 'Configuración']]],
+    ['gd.optimizacion', 'Optimización ABC'], ['gd.osr', 'Abastecimiento OSR'], ['gd.participacion', 'Participación por CD'], ['gd.config', 'Configuración']]],
   ['Continuidad', [
     ['co.panel', 'Panel'], ['co.turno', 'Mi turno'], ['co.calendario', 'Calendario'], ['co.asignar', 'Asignar y gestionar tareas'],
     ['co.equipo', 'Equipo'], ['co.dotacion', 'Dotación'], ['co.inventario', 'Inventario CD'], ['co.indicadores', 'Indicadores']]],
@@ -27,7 +27,7 @@ export const ROLES_BASE = [
   ['Supervisor', 'Opera su turno: control, cierre, mi turno, inventario y cargas de extracciones.',
     [...de('op.'), 'gd.turno', 'gd.cierre', 'co.panel', 'co.turno', 'co.calendario', 'co.inventario', 'da.cargas'].filter(c => c !== 'op.cierre.reabrir'), false],
   ['Gerente', 'Consulta resultados e indicadores, sin cargar ni modificar la operación.',
-    [...de('op.'), 'gd.cierre', 'gd.slow', 'gd.abc', 'gd.optimizacion', 'co.panel', 'co.calendario', 'co.indicadores'].filter(c => !['op.cierre.registrar', 'op.cierre.reabrir'].includes(c)), false]
+    [...de('op.'), 'gd.cierre', 'gd.slow', 'gd.abc', 'gd.optimizacion', 'gd.osr', 'gd.participacion', 'co.panel', 'co.calendario', 'co.indicadores'].filter(c => !['op.cierre.registrar', 'op.cierre.reabrir'].includes(c)), false]
 ];
 
 // Reglas para las operaciones que modifican datos: [método, ruta, permisos (basta uno)].
@@ -62,6 +62,8 @@ export const REGLAS = [
   R('PATCH', '/gestion/tareas/[^/]+', 'gd.tareas', 'gd.turno'),
   R('(POST|DELETE)', '/gestion/slow/.*', 'gd.slow'),
   R('(POST|DELETE)', '/gestion/abcxyz(/.*)?', 'gd.abc'),
+  R('POST', '/gestion/participacion/.*', 'gd.participacion'),
+  R('POST', '/gestion/optimizacion/(osr|abastecimiento|eventos)/.*', 'gd.osr'),
   R('POST', '/gestion/optimizacion/.*', 'gd.optimizacion'),
   R('(POST|PUT|DELETE)', '/gestion/config/.*', 'gd.config')
 ];

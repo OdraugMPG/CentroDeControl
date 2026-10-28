@@ -210,6 +210,72 @@ function PorCd({ porCd, cds }) {
   );
 }
 
+/** Clase ABC-XYZ por piso: cómo se reparten las clases en los pisos del ámbito (un CD o todos, agrupados por CD). */
+function PorPiso({ porPiso, ambito, todos }) {
+  const [modo, setModo] = useState('comp');
+  const pisos = Object.keys(porPiso).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  // totales del piso con todas las celdas (incluye A-/B-/C- sin historia, que no tienen columna)
+  const tot = (kp) => Object.values(porPiso[kp]).reduce((s, c) => s + c.stock, 0);
+  const totClase = (k) => pisos.reduce((s, kp) => s + (porPiso[kp]?.[k]?.stock || 0), 0);
+  const totGeneral = pisos.reduce((s, kp) => s + tot(kp), 0);
+  const skus = (kp) => Object.values(porPiso[kp]).reduce((s, c) => s + c.skus, 0);
+  const v = (kp, k) => {
+    const c = porPiso[kp]?.[k]?.stock || 0;
+    return modo === 'comp' ? div(c, tot(kp)) : div(c, totClase(k));
+  };
+  const val = (kp, k) => {
+    const c = porPiso[kp]?.[k];
+    if (modo === 'abs') return c ? <>{fmt(c.skus)} <span className="muted">/ {fmt(c.stock)}</span></> : <span className="muted">—</span>;
+    const x = v(kp, k);
+    return x > 0 ? pc(x) : <span className="muted">—</span>;
+  };
+  const fondo = (kp, k) => (modo === 'abs' ? undefined : { background: `color-mix(in srgb, var(--accent) ${Math.round(v(kp, k) * 55)}%, transparent)` });
+  if (!pisos.length) return null;
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>Clases ABC-XYZ por piso · {ambito}</h2>
+        <div className="chips">
+          <button className="chip" aria-pressed={modo === 'comp'} onClick={() => setModo('comp')}>% de las unidades del piso</button>
+          <button className="chip" aria-pressed={modo === 'donde'} onClick={() => setModo('donde')}>Dónde se almacena cada clase</button>
+          <button className="chip" aria-pressed={modo === 'abs'} onClick={() => setModo('abs')}>SKU / unidades</button>
+        </div>
+      </div>
+      <div className="tbl" style={{ maxHeight: 560 }}>
+        <table>
+          <thead><tr>{todos && <th>CD</th>}<th>Piso</th>{CLASES.map((k) => <th key={k} className="num"><span className={'pill ' + tono(k)}>{k}</span></th>)}<th className="num">Unidades</th><th className="num">SKU</th></tr></thead>
+          <tbody>
+            {pisos.map((kp, i) => {
+              const [cd, piso] = kp.split('|');
+              const nuevoCd = todos && (i === 0 || pisos[i - 1].split('|')[0] !== cd);
+              return (
+                <tr key={kp} style={nuevoCd && i ? { borderTop: '2px solid var(--line)' } : undefined}>
+                  {todos && <td>{nuevoCd ? <b>{cd}</b> : ''}</td>}
+                  <td>{piso}</td>
+                  {CLASES.map((k) => <td key={k} className="num" style={fondo(kp, k)}>{val(kp, k)}</td>)}
+                  <td className="num">{fmt(tot(kp))} <span className="muted">({pc(div(tot(kp), totGeneral), 0)})</span></td>
+                  <td className="num">{fmt(skus(kp))}</td>
+                </tr>
+              );
+            })}
+            <tr className="tot">
+              {todos && <td />}<td>Total</td>
+              {CLASES.map((k) => <td key={k} className="num">{modo === 'comp' ? pc(div(totClase(k), totGeneral)) : modo === 'donde' ? '100%' : fmt(totClase(k))}</td>)}
+              <td className="num">{fmt(totGeneral)}</td><td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="note">
+        {modo === 'comp' && 'Cada fila suma 100%: qué parte de las unidades almacenadas en el piso es de cada clase. La fila Total es la mezcla de clases de todo el ámbito.'}
+        {modo === 'donde' && 'Cada columna suma 100%: en qué pisos están las unidades de cada clase. Lo ideal es que AX/AY/BX se concentren en los pisos más cercanos al despacho.'}
+        {modo === 'abs' && 'SKU con stock en el piso / unidades almacenadas. Un SKU almacenado en varios pisos cuenta en cada uno (por eso la columna SKU no suma el total del ámbito).'}
+        {todos && ' Vista consolidada: la clase de cada SKU es la de todos los CD juntos.'}
+      </p>
+    </div>
+  );
+}
+
 export default function AbcXyz() {
   const [cd, setCd] = useState(TODOS);
   const [criterio, setCriterio] = useState('unidades');
@@ -354,6 +420,8 @@ export default function AbcXyz() {
         </div>
         {d.filas > d.detalle.length && <p className="note">Se muestran {fmt(d.detalle.length)} de {fmt(d.filas)} SKU (ordenados por venta).</p>}
       </div>
+
+      <PorPiso porPiso={d.resumen.porPiso || {}} ambito={ambito} todos={d.cd === TODOS} />
     </>
   );
 }

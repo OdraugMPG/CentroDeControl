@@ -109,10 +109,13 @@ export function clasificar(filasBase, { criterio = 'unidades', metodo = 'rotacio
     const cd = consolidado ? TODOS : r.cd;
     const k = cd + '|' + r.sku;
     let x = idx.get(k);
-    if (!x) { x = { cd, sku: r.sku, desc: r.desc, depto: r.depto || '(sin depto)', stock: 0, ventas: 0, costo: 0, stockCd: {} }; idx.set(k, x); }
+    if (!x) { x = { cd, sku: r.sku, desc: r.desc, depto: r.depto || '(sin depto)', stock: 0, ventas: 0, costo: 0, stockCd: {}, stockPiso: {} }; idx.set(k, x); }
     const q = r.qty > 0 ? r.qty : 0;
     x.stock += q;
     if (q) x.stockCd[r.cd] = (x.stockCd[r.cd] || 0) + q;
+    // por piso: clave 'CD|PISO' (en la vista de un CD solo aparecen sus pisos)
+    const kp = r.cd + '|' + (txt(r.piso) || '(sin piso)');
+    if (q) x.stockPiso[kp] = (x.stockPiso[kp] || 0) + q;
     // VENTAS y COSTO vienen repetidos en cada ubicación del SKU
     if (r.ventas > x.ventas) x.ventas = r.ventas;
     if (r.costo > x.costo) x.costo = r.costo;
@@ -156,7 +159,7 @@ export function clasificar(filasBase, { criterio = 'unidades', metodo = 'rotacio
   return out;
 }
 
-/** Resumen por celda de la matriz (A/B/C x X/Y/Z, más A-/B-/C- sin historia), por clase ABC y por CD. */
+/** Resumen por celda de la matriz (A/B/C x X/Y/Z, más A-/B-/C- sin historia), por clase ABC, por CD y por piso. */
 export function resumir(filas) {
   const nuevo = () => ({ skus: 0, metrica: 0, stock: 0 });
   const celdas = {};
@@ -164,7 +167,7 @@ export function resumir(filas) {
   const abc = { A: nuevo(), B: nuevo(), C: nuevo() };
   const total = nuevo();
   // por CD: SKU con stock y unidades de cada celda en cada CD (sirve en la vista consolidada)
-  const porCd = {};
+  const porCd = {}, porPiso = {};
   for (const x of filas) {
     for (const c of [celdas[x.matriz], abc[x.abc], total]) { c.skus++; c.metrica += x.metrica; c.stock += x.stock; }
     for (const [cd, q] of Object.entries(x.stockCd)) {
@@ -172,8 +175,13 @@ export function resumir(filas) {
       const c = (porCd[cd][x.matriz] ??= { skus: 0, stock: 0 });
       c.skus++; c.stock += q;
     }
+    for (const [kp, q] of Object.entries(x.stockPiso)) {
+      porPiso[kp] ??= {};
+      const c = (porPiso[kp][x.matriz] ??= { skus: 0, stock: 0 });
+      c.skus++; c.stock += q;
+    }
   }
-  return { celdas, abc, total, porCd };
+  return { celdas, abc, total, porCd, porPiso };
 }
 
 /** Curva de Pareto en `n` puntos: % de SKU (ordenados por venta) contra % de venta acumulada. */

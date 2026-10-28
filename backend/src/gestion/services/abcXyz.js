@@ -73,7 +73,7 @@ export async function abcXyz({ cd, criterio = 'unidades', metodo, celda, limite 
   return {
     carga: d.carga, cds, cd: cdSel, criterio, metodo: d.metodo, historia: d.historia, umbrales: d.umbrales, hayVentas: d.hayVentas, hayCosto: d.hayCosto,
     resumen: resumir(delCd), pareto: curvaPareto(delCd), sinVenta: delCd.filter((x) => !(x.ventas > 0)).length,
-    filas: sel.length, detalle: sel.slice(0, limite).map(({ stockCd, ...x }) => x), guardado: g[0].n ? g[0] : null,
+    filas: sel.length, detalle: sel.slice(0, limite).map(({ stockCd, stockPiso, ...x }) => x), guardado: g[0].n ? g[0] : null,
   };
 }
 

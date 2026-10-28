@@ -7,7 +7,7 @@ export const MODULOS = [
   ['gd', 'Gestión diaria', [
     ['/gestion', 'Asignación del día', 'gd.asignacion'], ['/gestion/tareas', 'Tareas', 'gd.tareas'], ['/gestion/conciliacion', 'Conciliación', 'gd.conciliacion'],
     ['/gestion/turno', 'Mi turno', 'gd.turno'], ['/gestion/cierre', 'Cierre por tareas', 'gd.cierre'], ['/gestion/slow', 'Slow moving', 'gd.slow'],
-    ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'], ['/gestion/config', 'Configuración', 'gd.config']]],
+    ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'], ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion'], ['/gestion/config', 'Configuración', 'gd.config']]],
   ['cont', 'Continuidad', [
     ['/continuidad', 'Panel', 'co.panel'], ['/continuidad/turno', 'Mi turno', 'co.turno'], ['/continuidad/calendario', 'Calendario', 'co.calendario'],
     ['/continuidad/asignar', 'Asignar', 'co.asignar'], ['/continuidad/equipo', 'Equipo', 'co.equipo'], ['/continuidad/dotacion', 'Dotación', 'co.dotacion'],

@@ -11,7 +11,11 @@ import { generarAsignacion } from '../gestion/services/asignacion.js';
 import { listarTareas, actualizarTarea, cierreConStock, kpi, archivoTurno, archivoWms, importarAvances } from '../gestion/services/tareas.js';
 import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow } from '../gestion/services/slow.js';
 import { abcXyz, guardarAbcXyz, cargarHistoria, borrarHistoria } from '../gestion/services/abcXyz.js';
-import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds } from '../gestion/services/optimizacion.js';
+import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds,
+  consolidacionInterna, archivoConsolidacionInterna } from '../gestion/services/optimizacion.js';
+import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbastecimiento } from '../gestion/services/abastecimientoOsr.js';
+import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
+import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
@@ -41,7 +45,10 @@ app.get('/estado', r(async (req) => {
   const fecha = fechaDe(req);
   const { rows: cargas } = await q('SELECT id, fecha, tipo, turno, archivo, filas, avisos, columnas, creado_en FROM cargas WHERE fecha = $1 ORDER BY id DESC', [fecha]);
   const { rows: asig } = await q('SELECT id, fecha, carga_id, creado_en, segundos, resumen, log FROM asignaciones WHERE fecha = $1 ORDER BY id DESC LIMIT 1', [fecha]);
-  const { rows: cnt } = await q("SELECT cd, proceso, count(*)::int AS n, sum(unid_asig)::float AS u FROM tareas WHERE fecha = $1 AND estado <> 'SIN DESTINO' GROUP BY cd, proceso ORDER BY cd", [fecha]);
+  // tareas y unidades por CD, turno y proceso; sd = tareas SIN DESTINO (no se publican al supervisor)
+  const { rows: cnt } = await q(`SELECT cd, turno, proceso, count(*) FILTER (WHERE estado <> 'SIN DESTINO')::int AS n,
+    coalesce(sum(unid_asig) FILTER (WHERE estado <> 'SIN DESTINO'), 0)::float AS u, count(*) FILTER (WHERE estado = 'SIN DESTINO')::int AS sd
+    FROM tareas WHERE fecha = $1 GROUP BY cd, turno, proceso ORDER BY cd, turno`, [fecha]);
   const { rows: cds } = await q('SELECT * FROM cd_config ORDER BY cd');
   const { rows: res } = await q('SELECT count(*)::int AS n FROM ubic_reservadas');
   const p = await leerParametros();
@@ -54,7 +61,7 @@ app.get('/cargas', r(async () => (await q('SELECT id, fecha, tipo, turno, archiv
 // ---- archivos de ejemplo (Base y ubicaciones reservadas inventadas, misma estructura del libro)
 const EJEMPLOS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data/ejemplo-gestion');
 app.get('/ejemplo/:archivo', (req, res, next) => {
-  if (!['Base_inicio_ejemplo.xlsx', 'Blq_Stk_unit_ejemplo.xlsx'].includes(req.params.archivo)) return next();
+  if (!['Base_inicio_ejemplo.xlsx', 'Blq_Stk_unit_ejemplo.xlsx', 'Pro_Evt_ejemplo.xlsx'].includes(req.params.archivo)) return next();
   res.download(path.join(EJEMPLOS, req.params.archivo));
 });
 
@@ -120,6 +127,30 @@ app.post('/optimizacion/osr/simular', r((req) => simularOsr(req.body || {})));
 app.post('/optimizacion/osr/generar', r((req) => generarIngresoOsr(req.body || {})));
 app.post('/optimizacion/consolidacion/simular', r((req) => consolidacionCds(req.body || {})));
 app.get('/optimizacion/consolidacion/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionCds(req.query))));
+app.post('/optimizacion/interna/simular', r((req) => consolidacionInterna(req.body || {})));
+app.get('/optimizacion/interna/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionInterna(req.query))));
+app.post('/optimizacion/abastecimiento/proyeccion', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el archivo con la proyección del evento (Pro_Evt).'), { status: 400 });
+  return cargarProyeccion(req.file.buffer, nombreArchivo(req.file), req.body?.evento);
+}));
+app.post('/optimizacion/abastecimiento/proyeccion/borrar', r(() => borrarProyeccion()));
+app.post('/optimizacion/abastecimiento/simular', r((req) => simularAbastecimiento(req.body || {})));
+app.get('/optimizacion/abastecimiento/excel', r(async (req, res) => enviarXlsx(res, await archivoAbastecimiento({ ...req.query, incluirNoAptos: req.query.incluirNoAptos === '1' }))));
+app.post('/participacion/venta', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el archivo de venta.'), { status: 400 });
+  return cargarVentaCd(req.file.buffer, nombreArchivo(req.file));
+}));
+app.post('/participacion/venta/borrar', r(() => borrarVentaCd()));
+app.post('/participacion/simular', r((req) => participacion(req.body || {})));
+app.get('/participacion/excel', r(async (req, res) => enviarXlsx(res, await archivoParticipacion({ ...req.query, soloOsr: req.query.soloOsr === '1' }))));
+app.get('/optimizacion/eventos/config', r(() => configEventos()));
+app.post('/optimizacion/eventos/config', r((req) => guardarConfigEventos(req.body || {})));
+app.post('/optimizacion/eventos/config/restablecer', r(() => restablecerConfigEventos()));
+app.get('/optimizacion/eventos/deptos', r(() => deptosEventos()));
+app.get('/optimizacion/eventos/todos', r(() => simularTodo()));
+app.post('/optimizacion/eventos/simular', r((req) => simularEvento(req.body || {})));
+app.get('/optimizacion/eventos/excel', r(async (req, res) => enviarXlsx(res, await archivoEvento(req.query))));
+app.get('/optimizacion/eventos/todos/excel', r(async (req, res) => enviarXlsx(res, await archivoTodo())));
 app.post('/optimizacion/reasignar', r((req) => generarReasignacion(req.body?.tipo === 'traer' ? 'traer' : 'liberar', req.body?.limite)));
 
 // ---- configuración
