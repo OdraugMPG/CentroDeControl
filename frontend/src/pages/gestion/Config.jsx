@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, fmt, fFecha } from './api.js';
-import { Subir, toast, useCarga } from './ui.jsx';
+import { IrACarga, toast, useCarga } from './ui.jsx';
 
 function FilaCD({ c, onGuardar }) {
   const [x, setX] = useState(c);
@@ -27,18 +27,12 @@ function FilaCD({ c, onGuardar }) {
 export default function Config() {
   const [cds, , recCds] = useCarga(() => api.get('/api/config/cds'), []);
   const [par, , recPar] = useCarga(() => api.get('/api/config/parametros'), []);
-  const [res, , recRes] = useCarga(() => api.get('/api/config/reservadas'), []);
+  const [res] = useCarga(() => api.get('/api/config/reservadas'), []);
   const [ciclo, , recCiclo] = useCarga(() => api.get('/api/config/ciclo'), []);
   const [vals, setVals] = useState(null);
-  const [subiendo, setSubiendo] = useState(false);
   useEffect(() => { if (par) setVals(Object.fromEntries(Object.keys(par.definiciones).map((k) => [k, String(par.valores[k])]))); }, [par]);
   const guardarCD = async (x) => { try { await api.put('/api/config/cds/' + x.cd, x); toast(`${x.cd} guardado.`); recCds(); } catch (e) { toast(e.message, true); } };
   const guardarPar = async () => { try { await api.put('/api/config/parametros', vals); toast('Parámetros guardados.'); recPar(); } catch (e) { toast(e.message, true); } };
-  const subirRes = async (f) => {
-    setSubiendo(true);
-    try { const fd = new FormData(); fd.append('archivo', f); const r = await api.post('/api/config/reservadas', fd); toast(`${r.cargadas} ubicaciones reservadas cargadas.`); recRes(); } catch (e) { toast(e.message, true); }
-    setSubiendo(false);
-  };
   const reiniciar = async (cd) => { const r = await api.del('/api/config/ciclo/' + cd); toast(`${cd}: ciclo de inventario reiniciado (${r.eliminadas} zonas).`); recCiclo(); };
   const grupos = (res || []).reduce((a, x) => ({ ...a, [x.grupo || '(sin piso)']: (a[x.grupo || '(sin piso)'] || 0) + 1 }), {});
   return (
@@ -55,7 +49,7 @@ export default function Config() {
         {cds && !cds.length && <p className="note">Los CD aparecen al cargar la primera Base de stock.</p>}
       </div>
       <div className="sec">
-        <div className="row spread"><h2 style={{ margin: 0 }}>Ubicaciones reservadas para stock unitario (Blq_Stk_unit)</h2><Subir etiqueta="Cargar Blq_Stk_unit" onArchivo={subirRes} cargando={subiendo} /></div>
+        <div className="row spread"><h2 style={{ margin: 0 }}>Ubicaciones reservadas para stock unitario (Blq_Stk_unit)</h2><IrACarga id="reservadas" etiqueta="Cargar Blq_Stk_unit (en Datos)" /></div>
         <p className="note">Columna A = ubicación, B = piso o grupo (opcional), C = capacidad MAX (opcional). Sirve la misma hoja del libro (desde la fila 5) o un archivo simple. Estas ubicaciones no son origen ni destino de consolidación.</p>
         <p>{fmt(res?.length || 0)} ubicaciones · {Object.entries(grupos).map(([g, n]) => `${g}: ${n}`).join(' · ')}</p>
       </div>

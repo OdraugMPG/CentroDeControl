@@ -9,7 +9,7 @@ import { leerParametros, guardarParametros, DEFAULTS } from '../gestion/services
 import { guardarCarga } from '../gestion/services/stock.js';
 import { generarAsignacion } from '../gestion/services/asignacion.js';
 import { listarTareas, actualizarTarea, cierreConStock, kpi, archivoTurno, archivoWms, importarAvances } from '../gestion/services/tareas.js';
-import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow } from '../gestion/services/slow.js';
+import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow, cargarListadoSlow, borrarListadoSlow, validarListadoSlow, archivoListadoSlow } from '../gestion/services/slow.js';
 import { abcXyz, guardarAbcXyz, cargarHistoria, borrarHistoria } from '../gestion/services/abcXyz.js';
 import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds,
   consolidacionInterna, archivoConsolidacionInterna } from '../gestion/services/optimizacion.js';
@@ -112,6 +112,13 @@ app.get('/slow/opciones', r(() => opciones()));
 app.post('/slow/simular', r((req) => simularSlow(req.body || {})));
 app.post('/slow/generar', r((req) => generarColaSlow(req.body?.filtros || {}, req.body?.destino)));
 app.get('/slow/cola', r(() => colaSlow()));
+app.post('/slow/validar', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el listado (SKU y QTY).'), { status: 400 });
+  return cargarListadoSlow(req.file.buffer, nombreArchivo(req.file));
+}));
+app.post('/slow/validar/borrar', r(() => borrarListadoSlow()));
+app.post('/slow/validar/resultado', r((req) => validarListadoSlow(req.body || {})));
+app.get('/slow/validar/excel', r(async (req, res) => enviarXlsx(res, await archivoListadoSlow())));
 app.delete('/slow/cola', r((req) => vaciarColaSlow(req.query.cd, req.query.tipo === 'REU' ? 'REU' : 'SM')));
 
 // ---- ABC / XYZ y optimización

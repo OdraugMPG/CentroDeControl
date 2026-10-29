@@ -1,4 +1,7 @@
-// Vistas y permisos (las claves son las de backend/src/lib/permisos.js, que además los aplica en la API)
+// Vistas y permisos (las claves son las de backend/src/lib/permisos.js, que además los aplica en la API).
+// Una vista puede pedir una lista de permisos: basta con tener uno.
+// Datos, Cargas reúne todas las cargas de archivos: la ve quien pueda cargar alguno (cada tarjeta pide el suyo).
+const CARGAS = ['da.cargas', 'gd.asignacion', 'gd.conciliacion', 'gd.abc', 'gd.config', 'gd.osr', 'gd.participacion', 'gd.slow', 'co.inventario'];
 export const MODULOS = [
   ['ctl', 'Operación', [
     ['/', 'Resumen', 'op.resumen'], ['/recepcion', 'Recepción', 'op.recepcion'], ['/almacenamiento', 'Almacenamiento', 'op.almacenamiento'],
@@ -12,11 +15,11 @@ export const MODULOS = [
     ['/continuidad', 'Panel', 'co.panel'], ['/continuidad/turno', 'Mi turno', 'co.turno'], ['/continuidad/calendario', 'Calendario', 'co.calendario'],
     ['/continuidad/asignar', 'Asignar', 'co.asignar'], ['/continuidad/equipo', 'Equipo', 'co.equipo'], ['/continuidad/dotacion', 'Dotación', 'co.dotacion'],
     ['/continuidad/inventario', 'Inventario CD', 'co.inventario'], ['/continuidad/indicadores', 'Indicadores', 'co.indicadores']]],
-  ['cfg', 'Datos', [['/cargas', 'Cargas de extracciones', 'da.cargas'], ['/configuracion', 'Metas y calendario', 'da.configuracion']]],
+  ['cfg', 'Datos', [['/cargas', 'Cargas de archivos', CARGAS], ['/configuracion', 'Metas y calendario', 'da.configuracion']]],
   ['adm', 'Administración', [['/admin/usuarios', 'Usuarios', 'ad.usuarios'], ['/admin/roles', 'Roles y permisos', 'ad.usuarios']]]
 ];
 
-export const puede = (u, ...permisos) => !!u && permisos.some(p => u.permisos?.includes(p));
+export const puede = (u, ...permisos) => !!u && permisos.flat().some(p => u.permisos?.includes(p));
 export const vistasDe = (u, modulo) => MODULOS.find(m => m[0] === modulo)[2].filter(v => puede(u, v[2]));
 
 // Módulo y vista de una ruta (la más específica que coincide)

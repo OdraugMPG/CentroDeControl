@@ -1,4 +1,4 @@
-// Participación de la venta por CD. El archivo de pedidos/despachos (SKU, QTY, DPTO, CD_PICKING, TIPO_PICKING,
+// Participación de la venta por CD. El archivo de pedidos/despachos (SKU, QTY_PICKING, DPTO, CD_PICKING, TIPO_PICKING,
 // FECHA_SALIDA...) se agrega por día de salida, CD de picking, tipo de picking y SKU. La vista muestra unidades y %
 // por CD y por depto, y simula qué SKU aptos para OSR que hoy no están en OSR hay que ingresar para llegar a un
 // target de participación del OSR: al ingresar un SKU se supone que el OSR pasa a despachar toda su venta.
@@ -15,7 +15,6 @@ import { libro } from './tareas.js';
 const AL = {
   sku: 'SKU|COD SKU|CODIGO SKU',
   desc: 'DESCRIPCION|DESC SKU|DESCRIPCION SKU',
-  qty: 'QTY|CANTIDAD|UNIDADES',
   qtyPick: 'QTY_PICKING|QTY PICKING',
   dpto: 'DPTO|DEPTO|DEPARTAMENTO',
   cd: 'CD_PICKING|CD PICKING',
@@ -37,7 +36,7 @@ const error = (m) => Object.assign(new Error(m), { status: 400 });
 // Carga del archivo: se reemplazan los días de venta que trae el archivo (se pueden ir sumando periodos)
 // ---------------------------------------------------------------------------------------------
 export async function cargarVentaCd(buffer, archivo) {
-  const t = leerTabla(buffer);
+  const t = await leerTabla(buffer);
   const { c } = t;
   const ag = new Map();
   const ped = new Map(); // pedido (SOLICITUD) → tipos de picking (1 = tarea, 2 = etiqueta), fecha y SKU
@@ -46,8 +45,8 @@ export async function cargarVentaCd(buffer, archivo) {
     const sku = skuKey(r[c.sku]);
     if (!sku) continue;
     if (c.estado >= 0 && /CANCEL|ANULAD/.test(up(r[c.estado]))) { anuladas++; continue; }
-    // con QTY_PICKING se cuenta solo lo pickeado (igual que la tabla dinámica "Suma de QTY_PICKING")
-    const u = c.qtyPick >= 0 ? num(r[c.qtyPick]) : num(r[c.qty]);
+    // las unidades son solo QTY_PICKING (lo pickeado, igual que la tabla dinámica "Suma de QTY_PICKING"); QTY y NEW_QTY no se usan
+    const u = num(r[c.qtyPick]);
     if (!(u > 0)) continue;
     const cd = (c.cd >= 0 ? up(r[c.cd]) : up(r[c.facility])) || '(SIN CD)';
     const tipo = c.tipo >= 0 ? tipoDe(r[c.tipo]) : '(SIN TIPO)';
@@ -99,34 +98,48 @@ export async function cargarVentaCd(buffer, archivo) {
     }
   });
   return { archivo, hoja: t.hoja, filas, anuladas, pedidos: ped.size, pedidosMixtos: mixtos, registros: regs.length, desde: fechas[0] || null, hasta: fechas[fechas.length - 1] || null, dias: fechas.length, sinFecha,
-    unidades: c.qtyPick >= 0 ? 'QTY_PICKING' : 'QTY', fecha: t.enc[c.fecha] || '', tipos: [...new Set(regs.map((x) => x.tipo))].sort(cmp) };
+    unidades: 'QTY_PICKING', fecha: t.enc[c.fecha] || '', tipos: [...new Set(regs.map((x) => x.tipo))].sort(cmp) };
 }
 
 const columnas = (enc) => Object.fromEntries(Object.entries(AL).map(([k, a]) => [k, buscarCol(enc, a)]));
-const reconoce = (c) => c.sku >= 0 && (c.qty >= 0 || c.qtyPick >= 0) && (c.cd >= 0 || c.facility >= 0);
+const reconoce = (c) => c.sku >= 0 && c.qtyPick >= 0 && (c.cd >= 0 || c.facility >= 0);
 
-/** Detalle del archivo: una hoja con encabezados o, si el libro solo trae una tabla dinámica, su caché de registros. */
-function leerTabla(buffer) {
+/**
+ * Detalle del archivo: una hoja con encabezados o, si el libro solo trae una tabla dinámica, su caché de registros.
+ * Los .xlsx se leen por partes (hojas, textos compartidos y caché), así una hoja de cientos de MB no queda en memoria
+ * como un solo texto (la librería XLSX la devolvía vacía). Los .xls y .csv se leen con XLSX.
+ */
+async function leerTabla(buffer) {
   const zip = entradasZip(buffer);
-  const rec = zip && [...zip.values()].find((e) => /pivotCacheRecords\d*\.xml$/.test(e.nombre));
-  const hojas = zip ? [...zip.values()].filter((e) => /worksheets\/sheet\d*\.xml$/.test(e.nombre)).reduce((s, e) => s + e.tam, 0) : Infinity;
-  // Libro de solo tabla dinámica: no se abre con XLSX (descomprimiría la caché completa en memoria)
-  if (rec && rec.tam > hojas * 4) {
-    const t = cachePivot(buffer, zip);
+  const vistos = [];
+  if (zip) {
+    const rec = [...zip.values()].find((e) => /pivotCacheRecords\d*\.xml$/.test(e.nombre));
+    const hojas = hojasXlsx(buffer, zip);
+    const ss = hojas.length ? await textosCompartidos(buffer, zip) : [];
+    for (const h of hojas) {
+      const t = await tablaDeHoja(buffer, h, ss);
+      if (t.c) return t;
+      vistos.push(t.visto);
+    }
+    const t = rec ? cachePivot(buffer, zip) : null;
     if (t && reconoce(t.c)) return t;
-  }
-  const wb = XLSX.read(buffer, { type: 'buffer', dense: true });
-  for (const n of wb.SheetNames) {
-    const m = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' });
-    for (let i = 0; i < Math.min(10, m.length); i++) {
-      const c = columnas(m[i]);
-      if (reconoce(c)) return { hoja: n, enc: m[i], c, filas: () => m.slice(i + 1) };
+    if (t?.enc?.length) vistos.push(`tabla dinámica: ${t.enc.join(', ')}`);
+    else if (!rec && [...zip.values()].some((e) => /pivotCacheDefinition\d*\.xml$/.test(e.nombre))) {
+      vistos.push('tabla dinámica sin datos de origen guardados (en Excel: Opciones de tabla dinámica → Datos → "Guardar datos de origen con el archivo", o doble clic en el Total general para sacar el detalle a una hoja)');
+    }
+  } else {
+    const wb = XLSX.read(buffer, { type: 'buffer', dense: true });
+    for (const n of wb.SheetNames) {
+      const m = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' });
+      for (let i = 0; i < Math.min(30, m.length); i++) {
+        const c = columnas(m[i]);
+        if (reconoce(c)) return { hoja: n, enc: m[i], c, filas: () => m.slice(i + 1) };
+      }
+      const enc = m.find((r) => r.filter((v) => txt(v)).length >= 2) || [];
+      vistos.push(`hoja "${n}" (${m.length} filas): ${enc.filter((v) => txt(v)).slice(0, 12).join(', ') || 'vacía'}`);
     }
   }
-  const t = rec ? cachePivot(buffer, zip) : null;
-  if (t && reconoce(t.c)) return t;
-  const vistos = t?.enc?.length ? ` Columnas de la tabla dinámica: ${t.enc.join(', ')}.` : '';
-  throw error(`No reconocí los encabezados: el archivo debe traer SKU, QTY (o QTY_PICKING) y CD_PICKING (o FACILITY), en una hoja o como origen de una tabla dinámica.${vistos}`);
+  throw error(`No reconocí los encabezados: el archivo debe traer SKU, QTY_PICKING y CD_PICKING (o FACILITY), en una hoja o como origen de una tabla dinámica. Encontré: ${vistos.join(' · ') || 'nada legible'}.`);
 }
 
 /** Directorio de un .xlsx (zip): nombre → { método, tamaño comprimido / descomprimido, inicio de los datos }. null si no es zip. */
@@ -150,9 +163,84 @@ function entradasZip(b) {
 const crudo = (b, e) => b.subarray(e.ini, e.ini + e.comp);
 const inflar = (b, e) => (e.metodo === 8 ? zlib.inflateRawSync(crudo(b, e)) : crudo(b, e));
 
+/** Descomprime una entrada del zip por partes; cada trozo de texto termina justo después de una etiqueta de cierre. */
+async function* trozosXml(buffer, e, cierre) {
+  const fuente = Readable.from([crudo(buffer, e)]);
+  const flujo = e.metodo === 8 ? fuente.pipe(zlib.createInflateRaw()) : fuente;
+  let resto = Buffer.alloc(0);
+  for await (const trozo of flujo) {
+    const b = resto.length ? Buffer.concat([resto, trozo]) : trozo;
+    const k = b.lastIndexOf(cierre);
+    if (k < 0) { resto = b; continue; }
+    resto = Buffer.from(b.subarray(k + cierre.length));
+    yield b.toString('utf8', 0, k + cierre.length);
+  }
+  if (resto.length) yield resto.toString('utf8');
+}
+
 const XML_ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const desXml = (s) => (s.includes('&') ? s.replace(/&(#x?[0-9a-fA-F]+|\w+);/g, (m, e) => (e[0] === '#' ? String.fromCodePoint(e[1] === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : XML_ENT[e] ?? m)) : s);
 const valXml = (tag, v) => (tag === 'm' ? '' : tag === 'n' ? Number(v) : desXml(v ?? ''));
+const textoXml = (s) => desXml([...s.replace(/<rPh\b[^]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([^<]*)<\/t>/g)].map((m) => m[1]).join(''));
+
+/** Hojas del libro en orden, con su archivo dentro del zip. */
+function hojasXlsx(buffer, zip) {
+  const wb = zip.get('xl/workbook.xml'), rels = zip.get('xl/_rels/workbook.xml.rels');
+  if (!wb || !rels) return [];
+  const rx = inflar(buffer, rels).toString('utf8');
+  const destino = new Map([...rx.matchAll(/<Relationship\b[^>]*>/g)].map((m) => [m[0].match(/\bId="([^"]+)"/)?.[1], m[0].match(/\bTarget="([^"]+)"/)?.[1]]));
+  return [...inflar(buffer, wb).toString('utf8').matchAll(/<sheet\b[^>]*>/g)].map((m) => {
+    const t = (destino.get(m[0].match(/\br:id="([^"]+)"/)?.[1]) || '').replace(/^\//, '');
+    return { nombre: desXml(m[0].match(/\bname="([^"]*)"/)?.[1] || ''), entrada: zip.get(t.startsWith('xl/') ? t : 'xl/' + t) };
+  }).filter((h) => h.entrada);
+}
+
+/** Textos compartidos (sharedStrings.xml), leídos por partes. */
+async function textosCompartidos(buffer, zip) {
+  const e = [...zip.values()].find((x) => /sharedStrings\.xml$/.test(x.nombre));
+  const lista = [];
+  if (e) for await (const t of trozosXml(buffer, e, '</si>')) for (const m of t.matchAll(/<si>([^]*?)<\/si>/g)) lista.push(textoXml(m[1]));
+  return lista;
+}
+
+const colRef = (ref) => { let n = 0; for (const ch of ref) { const k = ch.charCodeAt(0); if (k < 65 || k > 90) break; n = n * 26 + k - 64; } return n - 1; };
+
+/** Filas de una hoja .xlsx como arreglos de valores (números, textos y fechas como serial de Excel). */
+async function* filasXlsx(buffer, e, ss) {
+  for await (const t of trozosXml(buffer, e, '</row>')) {
+    for (const m of t.matchAll(/<row\b[^>]*?(?:\/>|>([^]*?)<\/row>)/g)) {
+      const r = [];
+      let j = 0;
+      for (const c of (m[1] || '').matchAll(/<c\b([^>]*?)(?:\/>|>([^]*?)<\/c>)/g)) {
+        const at = c[1], cont = c[2] || '';
+        const ref = at.match(/\br="([A-Z]+)\d*"/);
+        if (ref) j = colRef(ref[1]);
+        const tipo = at.match(/\bt="(\w+)"/)?.[1];
+        const v = cont.match(/<v>([^<]*)<\/v>/)?.[1];
+        r[j] = tipo === 's' ? ss[Number(v)] ?? '' : tipo === 'inlineStr' ? textoXml(cont) : tipo === 'str' || tipo === 'd' || tipo === 'e' ? desXml(v ?? '')
+          : tipo === 'b' ? v === '1' : v === undefined ? '' : Number(v);
+        j++;
+      }
+      yield r;
+    }
+  }
+}
+
+/** Busca el encabezado en las primeras 30 filas de la hoja; si está, devuelve la tabla lista para recorrer. */
+async function tablaDeHoja(buffer, h, ss) {
+  const it = filasXlsx(buffer, h.entrada, ss);
+  let primera = null;
+  for (let i = 0; i < 30; i++) {
+    const { value: fila, done } = await it.next();
+    if (done) break;
+    const enc = Array.from(fila, (v) => v ?? '');
+    if (!primera && enc.filter((v) => txt(v)).length >= 2) primera = enc;
+    const c = columnas(enc);
+    if (reconoce(c)) return { hoja: h.nombre, enc, c, filas: async function* () { yield* it; } };
+  }
+  await it.return();
+  return { visto: `hoja "${h.nombre}": ${primera ? primera.filter((v) => txt(v)).slice(0, 12).join(', ') : 'vacía'}` };
+}
 
 /** Lee pivotCacheDefinition / pivotCacheRecords (xlsx) por partes: solo se llenan las columnas que usa el módulo. */
 function cachePivot(buffer, zip) {
@@ -179,16 +267,7 @@ function cachePivot(buffer, zip) {
     return r;
   };
   async function* filas() {
-    const fuente = Readable.from([crudo(buffer, rec)]);
-    const flujo = rec.metodo === 8 ? fuente.pipe(zlib.createInflateRaw()) : fuente;
-    let resto = Buffer.alloc(0);
-    for await (const trozo of flujo) {
-      const b = resto.length ? Buffer.concat([resto, trozo]) : trozo;
-      const k = b.lastIndexOf('</r>');
-      if (k < 0) { resto = b; continue; }
-      resto = Buffer.from(b.subarray(k + 4));
-      for (const m of b.toString('utf8', 0, k + 4).matchAll(/<r>([^]*?)<\/r>/g)) yield fila(m[1]);
-    }
+    for await (const t of trozosXml(buffer, rec, '</r>')) for (const m of t.matchAll(/<r>([^]*?)<\/r>/g)) yield fila(m[1]);
   }
   return { hoja: 'tabla dinámica (caché)', enc, c, filas };
 }

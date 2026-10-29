@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha, hora, PROC } from './api.js';
-import { Subir, toast, useCarga } from './ui.jsx';
+import { IrACarga, toast, useCarga } from './ui.jsx';
 
 // [proceso, nombre, medida]: inventario se mide en ubicaciones a contar; el resto en unidades a mover
 const PROCS = [['INV', 'Inventario', 'ubicaciones'], ['CONS', 'Consolidación', 'unidades'], ['SU', 'Stock unitario', 'unidades'], ['SM', 'Slow moving', 'unidades'], ['REU', 'Reubicación ABC', 'unidades']];
@@ -22,22 +22,10 @@ function Celda({ x, total }) {
 export default function Hoy({ fecha, irA }) {
   const [est, err, recargar] = useCarga(() => api.get('/api/estado' + qs({ fecha })), [fecha]);
   const [plan] = useCarga(() => api.get('/api/plan' + qs({ fecha })), [fecha, est?.asignacion?.id]);
-  const [subiendo, setSubiendo] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [conflicto, setConflicto] = useState(null);
   const [verPlan, setVerPlan] = useState(false);
 
-  const subir = async (f) => {
-    setSubiendo(true);
-    try {
-      const fd = new FormData();
-      fd.append('archivo', f); fd.append('fecha', fecha);
-      const r = await api.post('/api/cargas/inicio', fd);
-      toast(`Base cargada: ${fmt(r.carga.filas)} filas.${r.cdsNuevos.length ? ' CD nuevos en Configuración: ' + r.cdsNuevos.join(', ') : ''}`);
-      recargar();
-    } catch (e) { toast(e.message, true); }
-    setSubiendo(false);
-  };
   const generar = async (forzar = false) => {
     setGenerando(true); setConflicto(null);
     try {
@@ -85,7 +73,7 @@ export default function Hoy({ fecha, irA }) {
             <div>
               <h3>Base del inicio de la jornada</h3>
               <div className="row" style={{ alignItems: 'center' }}>
-                <Subir etiqueta={inicio ? 'Reemplazar Base' : 'Cargar Base de stock'} onArchivo={subir} cargando={subiendo} />
+                <IrACarga id="stock" fecha={fecha} etiqueta={inicio ? 'Reemplazar Base (en Datos)' : 'Cargar Base de stock (en Datos)'} />
                 {inicio ? <span className="note">{inicio.archivo} · {fmt(inicio.filas)} filas · cargada {hora(inicio.creado_en)}</span> : <span className="note">El mismo archivo de stock que hoy pegas en la hoja Base (.xlsx o .csv).</span>}
               </div>
               {(inicio?.avisos || []).map((x) => <div key={x} className="alert warn">{x}</div>)}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { api, qs, fmt, fFecha, hora } from './api.js';
-import { Subir, toast, useCarga } from './ui.jsx';
+import { IrACarga, toast, useCarga } from './ui.jsx';
 
 const TODOS = 'TODOS';
 const ABC = { A: 'Alto', B: 'Medio', C: 'Bajo' };
@@ -281,18 +281,8 @@ export default function AbcXyz() {
   const [criterio, setCriterio] = useState('unidades');
   const [metodo, setMetodo] = useState('rotacion');
   const [celda, setCelda] = useState('');
-  const [subiendo, setSubiendo] = useState(false);
   const [d, err, rec] = useCarga(() => api.get('/api/abcxyz' + qs({ cd, criterio, metodo, celda })), [cd, criterio, metodo, celda]);
 
-  const subirHist = async (f) => {
-    setSubiendo(true);
-    try {
-      const fd = new FormData(); fd.append('archivo', f);
-      const r = await api.post('/api/abcxyz/historia', fd);
-      toast(`Historia cargada: ${fmt(r.skus)} SKU, ${r.meses.length} meses (${r.meses[0]} a ${r.meses[r.meses.length - 1]}).`);
-      setMetodo('historia'); setCelda(''); rec();
-    } catch (e) { toast(e.message, true); } finally { setSubiendo(false); }
-  };
   const borrarHist = async () => { await api.del('/api/abcxyz/historia'); toast('Historia de ventas borrada.'); setMetodo('rotacion'); rec(); };
   const guardar = async () => {
     try { const r = await api.post('/api/abcxyz/guardar', { criterio, metodo }); toast(`Clasificación guardada: ${fmt(r.skus)} SKU en ${r.cds} CD (XYZ por ${r.metodo === 'historia' ? 'variabilidad' : 'rotación'}).`); rec(); } catch (e) { toast(e.message, true); }
@@ -347,7 +337,7 @@ export default function AbcXyz() {
             <button className="chip" aria-pressed={d.metodo === 'historia'} disabled={!d.historia} title={d.historia ? '' : 'Carga primero las ventas mensuales'} onClick={() => cambiar(setMetodo)('historia')}>Variabilidad mensual</button>
           </div>
           <div className="row" style={{ alignItems: 'center', marginTop: 8 }}>
-            <Subir etiqueta="Cargar ventas mensuales" onArchivo={subirHist} cargando={subiendo} />
+            <IrACarga id="historia" etiqueta="Cargar ventas mensuales (en Datos)" />
             {d.historia && <button className="btn sm danger" onClick={borrarHist}>Borrar historia</button>}
           </div>
           <p className="note" style={{ marginBottom: 0 }}>

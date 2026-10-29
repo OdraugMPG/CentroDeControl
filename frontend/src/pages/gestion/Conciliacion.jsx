@@ -1,42 +1,18 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { api, qs, fmt, hora, fFecha } from './api.js';
-import { Subir, toast, useCarga, Tiles } from './ui.jsx';
+import { IrACarga, useCarga, Tiles } from './ui.jsx';
 
 export default function Conciliacion({ fecha }) {
-  const [turno, setTurno] = useState('1');
-  const [ocupado, setOcupado] = useState(false);
-  const [res, setRes] = useState(null);
-  const [lista, , recargar] = useCarga(() => api.get('/api/conciliaciones' + qs({ fecha })), [fecha]);
-  const [k, , recK] = useCarga(() => api.get('/api/kpi' + qs({ fecha })), [fecha]);
-  const cierre = async (f) => {
-    setOcupado(true); setRes(null);
-    try {
-      const fd = new FormData();
-      fd.append('archivo', f); fd.append('fecha', fecha); fd.append('turno', turno);
-      const r = await api.post('/api/cargas/cierre', fd);
-      setRes(r); recargar(); recK();
-      toast(`${r.ejecutadas} tareas ejecutadas y ${r.parciales} parciales según el stock de cierre.`);
-    } catch (e) { toast(e.message, true); }
-    setOcupado(false);
-  };
-  const importar = async (f) => {
-    setOcupado(true);
-    try {
-      const fd = new FormData(); fd.append('archivo', f);
-      const r = await api.post('/api/avances/importar', fd);
-      toast(`${r.actualizadas} tareas actualizadas desde el archivo.`); recK();
-      if (r.errores.length) toast(r.errores.join(' · '), true);
-    } catch (e) { toast(e.message, true); }
-    setOcupado(false);
-  };
+  const [lista] = useCarga(() => api.get('/api/conciliaciones' + qs({ fecha })), [fecha]);
+  const [k] = useCarga(() => api.get('/api/kpi' + qs({ fecha })), [fecha]);
   return (
     <>
       <div className="top"><div><h1>Conciliación</h1><div className="sub">Al cierre de cada turno carga el mismo archivo de stock. La plataforma lo compara con la Base del inicio y marca cada tarea según dónde quedó el stock; nadie digita el avance.</div></div></div>
       <div className="sec">
         <h2>Stock al cierre del turno</h2>
-        <div className="row" style={{ alignItems: 'flex-end' }}>
-          <div><label className="lbl" htmlFor="c-t">Turno que cierra</label><select id="c-t" value={turno} onChange={(e) => setTurno(e.target.value)}><option value="1">T1</option><option value="2">T2</option><option value="3">T3</option></select></div>
-          <Subir etiqueta="Cargar stock de cierre" onArchivo={cierre} cargando={ocupado} />
+        <div className="row" style={{ alignItems: 'center' }}>
+          <IrACarga id="stock" fecha={fecha} etiqueta="Cargar stock de cierre (en Datos)" />
+          <span className="note">En Datos, Cargas elige la jornada y "Stock al cierre del turno T1 / T2 / T3".</span>
         </div>
         <table style={{ marginTop: 14 }}>
           <thead><tr><th>Proceso</th><th>Regla de cruce con el stock</th></tr></thead>
@@ -48,7 +24,6 @@ export default function Conciliacion({ fecha }) {
           </tbody>
         </table>
         <p className="note">Se revisan las tareas pendientes o parciales de los turnos hasta el elegido. Una tarea nunca retrocede: si ya estaba ejecutada, se mantiene.</p>
-        {res && <div className="alert good">{fmt(res.revisadas)} tareas revisadas: {fmt(res.ejecutadas)} ejecutadas, {fmt(res.parciales)} parciales, {fmt(res.sinCambio)} sin movimiento{res.revisar ? `, ${res.revisar} para revisar (el origen bajó pero el destino no recibió)` : ''}.</div>}
       </div>
       {k && <Tiles k={k.total} meta={k.meta} />}
       <div className="sec">
@@ -63,8 +38,8 @@ export default function Conciliacion({ fecha }) {
       </div>
       <div className="sec">
         <h2>Respaldo: archivo del supervisor</h2>
-        <p className="note">Si un turno no tiene foto de stock, el supervisor puede completar su archivo .xlsx (descargado en "Asignación del día") e importarlo aquí, igual que en el libro Excel.</p>
-        <Subir etiqueta="Importar archivo del turno" onArchivo={importar} cargando={ocupado} accept=".xlsx" />
+        <p className="note">Si un turno no tiene foto de stock, el supervisor puede completar su archivo .xlsx (descargado en "Asignación del día") e importarlo en Datos, Cargas ("Avance del turno"), igual que en el libro Excel.</p>
+        <IrACarga id="avances" etiqueta="Importar archivo del turno (en Datos)" />
       </div>
     </>
   );

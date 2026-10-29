@@ -2,7 +2,7 @@
 // de picking (TAREA / ETIQUETA) y simulación de los SKU aptos para OSR que habría que ingresar para llegar al target.
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, pct, fFecha } from './api.js';
-import { Subir, toast } from './ui.jsx';
+import { IrACarga, toast } from './ui.jsx';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 const TIPOS = [['TAREA', 'Tarea'], ['ETIQUETA', 'Etiqueta'], ['TODOS', 'Ambos']];
@@ -18,7 +18,6 @@ export default function ParticipacionCd() {
   const [f, setF] = useState({ tipo: 'TAREA', desde: '', hasta: '', cd: '', target: '', modo: 'total', excluir: [], soloOsr: false, depto: '', estado: '' });
   const [lista, setLista] = useState('sel');
   const [rec, setRec] = useState(0);
-  const [subiendo, setSubiendo] = useState(false);
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
   const cuerpo = { ...f, target: f.target === '' ? '' : Number(f.target) / 100 };
@@ -30,15 +29,6 @@ export default function ParticipacionCd() {
   const set = (k) => (v) => setF({ ...f, [k]: v });
   const alt = (k, v) => set(k)(f[k] === v ? '' : v);
 
-  const subir = async (archivo) => {
-    setSubiendo(true);
-    try {
-      const fd = new FormData(); fd.append('archivo', archivo);
-      const x = await api.post('/api/participacion/venta', fd);
-      toast(`Venta cargada: ${fmt(x.filas)} líneas (${x.dias} días${x.desde ? `, ${fFecha(x.desde)} al ${fFecha(x.hasta)}` : ''}). Unidades desde ${x.unidades}.`);
-      setRec(rec + 1);
-    } catch (e) { toast(e.message, true); } finally { setSubiendo(false); }
-  };
   const borrar = async () => {
     if (!window.confirm('¿Borrar toda la venta cargada?')) return;
     try { await api.post('/api/participacion/venta/borrar'); setRec(rec + 1); } catch (e) { toast(e.message, true); }
@@ -64,7 +54,7 @@ export default function ParticipacionCd() {
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="lbl">Venta por CD</legend>
             <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-              <Subir etiqueta={r?.info?.registros ? 'Agregar / reemplazar venta' : 'Cargar venta'} onArchivo={subir} cargando={subiendo} />
+              <IrACarga id="venta" etiqueta={r?.info?.registros ? 'Agregar / reemplazar venta (en Datos)' : 'Cargar venta (en Datos)'} />
               {r?.info?.registros > 0 && <button className="btn sm" onClick={borrar}>Borrar todo</button>}
             </div>
           </fieldset>
@@ -96,7 +86,7 @@ export default function ParticipacionCd() {
         )}
         {r?.info?.registros > 0 && <p className="note">Cargado: {fFecha(r.info.desde)} al {fFecha(r.info.hasta)} · {r.info.dias} días · {fmt(r.info.unidades)} unidades · tipos {r.info.tipos.join(', ')}. Fecha = FECHA_SALIDA; unidades = QTY_PICKING; se excluyen las líneas CANCELLED. Al cargar un archivo se reemplazan solo los días que trae.</p>}
 
-        {r?.sinDatos && <div className="alert">Carga el archivo de pedidos con las columnas <b>SKU</b>, <b>DESCRIPCION</b>, <b>QTY</b> / <b>QTY_PICKING</b>, <b>DPTO</b>, <b>CD_PICKING</b>, <b>TIPO_PICKING</b> y <b>FECHA_SALIDA</b>, en una hoja o como origen de una tabla dinámica (se lee su caché). Se suma QTY_PICKING.</div>}
+        {r?.sinDatos && <div className="alert">Carga el archivo de pedidos con las columnas <b>SKU</b>, <b>DESCRIPCION</b>, <b>QTY_PICKING</b>, <b>DPTO</b>, <b>CD_PICKING</b>, <b>TIPO_PICKING</b> y <b>FECHA_SALIDA</b>, en una hoja o como origen de una tabla dinámica (se lee su caché). Las unidades son solo la suma de QTY_PICKING (QTY y NEW_QTY no se usan).</div>}
         {r && !r.sinDatos && (
           <>
             {!r.hayBase && <div className="alert warn">No hay Base de stock cargada: no se puede validar Logística OSR ni el stock en {obj}. Se consideran candidatos todos los SKU sin venta desde {obj}.</div>}

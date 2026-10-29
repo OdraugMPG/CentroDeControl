@@ -1,8 +1,9 @@
 // Inventario CD: layout reutilizable, asignación y seguimiento del calendario de inventarios
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp, useCarga } from '../../lib/contexto.jsx';
 import { api } from '../../lib/api.js';
-import { Card, Cargando, PageHead, SubirArchivo, Kpis } from '../../components/ui.jsx';
+import { Card, Cargando, PageHead, Kpis } from '../../components/ui.jsx';
 import { dmy } from '../../lib/fmt.js';
 
 function estadoInv(r, hoy) {
@@ -26,7 +27,6 @@ export default function Inventario() {
   const hoy = meta.fechaOperativa;
   const op = (campo, filtros) => [...new Set(L.filter(l => Object.entries(filtros).every(([k, v]) => !v || l[k] === v)).map(l => l[campo]))].filter(Boolean);
   const act = async (fn, ok) => { try { await fn(); avisar(ok); d.recargar(); } catch (e) { avisar(e.message, 'err'); } };
-  const subir = f => { const fd = new FormData(); fd.append('archivo', f); act(() => api.post('/continuidad/inventario/importar', fd), 'Calendario importado.'); };
   const filas = d.data.asignaciones.filter(r => !filtro || r.cd === filtro);
   const est = filas.map(r => estadoInv(r, hoy)[1]);
 
@@ -37,7 +37,7 @@ export default function Inventario() {
         ['Con retraso o no realizados', est.filter(x => x === 'vencida').length, est.includes('vencida') ? 'warn' : ''], ['Pendientes', est.filter(x => x === 'abierta').length]]} />
       <div className="grid">
         <Card className="s6" title="Cargar calendario desde Excel" hint="Reconoce las columnas CD, Nivel, Zona, Pasillo, Jefe Turno, Supervisor, Qty. Op., Asignado, Adecco, Ejecutado, Tiempo y Estado, en cualquier orden.">
-          <SubirArchivo onFile={subir} />
+          <Link className="btn" to="/cargas#carga-inventario">Cargar calendario (en Datos)</Link>
         </Card>
         <Card className="s6" title="Layout del CD" hint="Ubicaciones reutilizables: se registran una vez y luego se eligen al asignar.">
           <div className="grid4">

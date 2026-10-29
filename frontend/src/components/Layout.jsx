@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApp } from '../lib/contexto.jsx';
 import { hhmm, fechaHora } from '../lib/fmt.js';
-import { MODULOS, vistaDe, vistasDe, primeraRuta } from '../lib/permisos.js';
+import { MODULOS, vistaDe, vistasDe, primeraRuta, puede } from '../lib/permisos.js';
 import { Login, CambiarClave } from './Acceso.jsx';
 
 function Reloj() {
@@ -49,7 +49,7 @@ export default function Layout() {
   const inicio = primeraRuta(usuario);
   const modulos = MODULOS.map(([k, l]) => [k, l, vistasDe(usuario, k)]).filter(m => m[2].length);
   const sub = modulos.find(m => m[0] === modulo)?.[2] || [];
-  const permitido = actual && usuario.permisos.includes(actual.vista[2]);
+  const permitido = actual && puede(usuario, actual.vista[2]);
   // Sin permiso para esta vista: la primera permitida del mismo módulo o, si no hay, la primera de todas
   const destino = sub[0]?.[0] || inicio;
   const edad = snap?.corte ? (Date.now() - snap.corte) / 60000 : null;

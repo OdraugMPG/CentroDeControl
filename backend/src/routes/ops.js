@@ -13,6 +13,7 @@ import { importarRecepcion } from '../import/recepcion.js';
 import { importarAlmacenamiento } from '../import/almacenamiento.js';
 import { importarOlas } from '../import/olas.js';
 import { plantilla } from '../import/plantillas.js';
+import { modelo } from '../import/modelos.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
 
 const r = Router();
@@ -95,6 +96,11 @@ r.get('/cargas/plantilla/:tipo', ah(async (req, res) => {
   const buf = await plantilla(req.params.tipo);
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     .set('Content-Disposition', `attachment; filename="plantilla-${req.params.tipo}.xlsx"`).send(Buffer.from(buf));
+}));
+r.get('/cargas/modelo/:tipo', ah(async (req, res) => {
+  const m = await modelo(req.params.tipo);
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .set('Content-Disposition', `attachment; filename="${m.nombre}"`).send(m.buffer);
 }));
 r.post('/cargas/:tipo', upload.single('archivo'), ah(async (req, res) => {
   const fn = IMPORT[req.params.tipo];

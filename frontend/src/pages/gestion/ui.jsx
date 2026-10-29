@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { pct, clase, color, fmt } from './api.js';
 
 export function Pill({ estado }) {
@@ -42,6 +43,11 @@ export function Barra({ valor, meta = 0.95 }) {
 let avisar = () => {};
 export const toast = (m, err = false) => avisar(m, err);
 export const conectarAvisos = (fn) => { avisar = fn; };
+
+/** Todas las cargas de archivos se hacen en Datos, Cargas: lleva a la tarjeta del archivo (con su modelo). */
+export function IrACarga({ id, etiqueta, fecha }) {
+  return <Link className="btn primary" to={`/cargas${fecha ? `?fecha=${fecha}` : ''}#carga-${id}`}>{etiqueta}</Link>;
+}
 
 export function Subir({ etiqueta, onArchivo, cargando, accept = '.xlsx,.xls,.xlsm,.csv' }) {
   const ref = useRef();

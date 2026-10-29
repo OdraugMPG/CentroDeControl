@@ -2,7 +2,7 @@
 // proyección del evento (paso 5) con la lista de traslado al OSR (paso 6), e ingreso de alta rotación por días de cobertura.
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha } from './api.js';
-import { Subir, toast } from './ui.jsx';
+import { IrACarga, toast } from './ui.jsx';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 
@@ -350,20 +350,10 @@ function ReabastoProyeccion() {
   const [f, setF] = useState({ pctOsr: '', colchon: '', olas: '', minimo: '', incluirNoAptos: false, estado: '', depto: '' });
   const [rec, setRec] = useState(0);
   const [vista, setVista] = useState('det');
-  const [subiendo, setSubiendo] = useState(false);
   const cuerpo = { ...f, pctOsr: f.pctOsr === '' ? '' : Number(f.pctOsr) / 100, colchon: f.colchon === '' ? '' : Number(f.colchon) / 100 };
   const [r, cargando] = useSimulacion('/api/optimizacion/abastecimiento/simular', cuerpo, [JSON.stringify(f), rec]);
   const set = (k) => (v) => setF({ ...f, [k]: v });
   const alt = (k, v) => set(k)(f[k] === v ? '' : v);
-  const subir = async (archivo) => {
-    setSubiendo(true);
-    try {
-      const fd = new FormData(); fd.append('archivo', archivo);
-      const x = await api.post('/api/optimizacion/abastecimiento/proyeccion', fd);
-      toast(`Proyección cargada: ${x.deptos} filas, ${fmt(x.unidades)} unidades.`);
-      setF({ ...f, estado: '', depto: '' }); setRec(rec + 1);
-    } catch (e) { toast(e.message, true); } finally { setSubiendo(false); }
-  };
   const quitar = async () => { try { await api.post('/api/optimizacion/abastecimiento/proyeccion/borrar'); setRec(rec + 1); } catch (e) { toast(e.message, true); } };
   const osr = r?.osr || 'OSR';
   const g = r?.g, c = r?.conf;
@@ -384,9 +374,8 @@ function ReabastoProyeccion() {
           <legend className="lbl">Proyección del evento (Pro_Evt)</legend>
           <div className="row" style={{ alignItems: 'center' }}>
             {r?.proy ? <span><b>{r.proy.evento}</b> <span className="note">· {r.proy.archivo} · {r.proy.filas} filas · cargada {fFecha(r.proy.cargado)}</span></span> : <span className="note">Sin proyección cargada</span>}
-            <Subir etiqueta={r?.proy ? 'Reemplazar Pro_Evt' : 'Cargar Pro_Evt'} onArchivo={subir} cargando={subiendo} />
+            <IrACarga id="proevt" etiqueta={r?.proy ? 'Reemplazar Pro_Evt (en Datos)' : 'Cargar Pro_Evt (en Datos)'} />
             {r?.proy && <button className="btn sm" onClick={quitar}>Quitar</button>}
-            <a className="link" href={urlApi('/api/ejemplo/Pro_Evt_ejemplo.xlsx')}>Descargar ejemplo</a>
           </div>
         </fieldset>
         {r?.proy && c && (

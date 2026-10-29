@@ -326,3 +326,5 @@ textarea.sum{min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospa
 .upload{border:2px dashed var(--line);border-radius:8px;padding:16px;display:grid;gap:8px;background:var(--bg)}
 .upload.drag{border-color:var(--ink)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.card.resaltar{outline:2px solid var(--blue);outline-offset:2px;transition:outline-color .6s}
