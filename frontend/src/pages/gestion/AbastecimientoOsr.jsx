@@ -1,5 +1,6 @@
 // Abastecimiento OSR (libro AnalisisABC_SegunEvento): simulador de eventos (pasos 2 a 4), reabasto según la
-// proyección del evento (paso 5) con la lista de traslado al OSR (paso 6), e ingreso de alta rotación por días de cobertura.
+// proyección del evento (paso 5) con la lista de traslado al OSR (paso 6), potencial de SKU fuera de OSR por clase ABC/XYZ
+// e ingreso de alta rotación por días de cobertura.
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha } from './api.js';
 import { IrACarga, toast } from './ui.jsx';
@@ -491,7 +492,476 @@ function Tabla({ enc, num, filas, total, n }) {
   );
 }
 
-const PESTANAS = [['eventos', 'Simulador de eventos'], ['reabasto', 'Reabasto por proyección'], ['rotacion', 'Ingreso de alta rotación']];
+// =============================================================================================
+// Potencial fuera de OSR: SKU con stock en otros CD que por su clase ABC/XYZ conviene ingresar al OSR (escenarios)
+// =============================================================================================
+const CLASES9 = ['AX', 'AY', 'AZ', 'BX', 'BY', 'BZ', 'CX', 'CY', 'CZ'];
+const ORDEN_POT = [['', 'Clase y venta'], ['ingresar', 'A ingresar'], ['fuera', 'Stock fuera'], ['ventaDia', 'Venta/día'], ['factor', 'Factor del evento'], ['cob', 'Días de cobertura'], ['queda', 'Queda fuera'], ['nUb', 'Ubicaciones a tomar'], ['totes', 'Totes OSR']];
+
+function PotencialOsr() {
+  const [f, setF] = useState({ clases: ['AX', 'AY', 'BX', 'BY'], aptitud: 'Y', enOsr: 'SIN', cds: [], minFuera: '', minVenta: '', dias: '', soloDeptosOsr: false, depto: '', buscar: '', orden: '', dir: 'desc', top: '', ssDias: '', ssMin: '', maxSkus: '', evento: '', evtModo: 'PRIORIZAR', evtMin: '', tote: 'AUTO', capTote: '',
+    noYModo: 'VER', noYEstados: [], noYClases: [] });
+  const [vista, setVista] = useState('sku');
+  const [r, cargando] = useSimulacion('/api/optimizacion/osr/potencial', f, [JSON.stringify(f)]);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const alt = (k, v) => set(k)(f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v]);
+  const osr = r?.osr || 'OSR';
+  const t = r?.tot;
+  const cdsVer = r ? r.cds.filter((cd) => r.porCd.some((c) => c.cd === cd)) : [];
+  const excel = urlApi('/api/optimizacion/osr/potencial/excel' + qs({ ...f, clases: f.clases.join(','), cds: f.cds.join(','), noYEstados: f.noYEstados.join(','), noYClases: f.noYClases.join(','), soloDeptosOsr: f.soloDeptosOsr ? '1' : '', depto: '', orden: '', top: '' }));
+  const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>Potencial fuera de {osr}</h2>
+        {r && <a className="btn primary" href={excel}>Exportar a Excel</a>}
+      </div>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en los demás CD que, por su clase ABC / XYZ, conviene llevar a {osr}. Elige las clases en la matriz y acota el escenario con los filtros: aptitud, stock fuera mínimo, venta diaria, CD de origen y días de cobertura (tope de lo que se ingresa = venta diaria x días; vacío = todo lo disponible). Siempre queda fuera de {osr} un stock de seguridad (días de venta, con un mínimo de unidades): solo se ingresa lo que sobra, tomado de las ubicaciones con más unidades. Con un máximo de SKU entran los de mayor prioridad (clase A y más venta). Con un evento del simulador, los deptos con mayor factor del evento van primero y la cobertura usa la venta del evento. No se considera el stock de {r?.buffer?.join(' / ') || 'RCI'} (buffer de reabastecimiento). Cada ubicación de {osr} es un tote de un SKU; en half o quarter el tote se divide en 2 o 4 compartimentos. La capacidad de un tote entero se estima por depto con el percentil 90 de sus totes actuales en {osr} (o la que escribas). Venta diaria = ventas de 2 meses / 60.</p>
+      {r && !r.hayCol && <div className="alert warn">La Base no trae la columna "Logística OSR": todos los SKU cuentan como aptos.</div>}
+
+      <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,auto) minmax(0,1fr)', alignItems: 'start' }}>
+        <div>
+          <span className="lbl">Clases a ingresar (clic en la celda)</span>
+          <table className="pot-matriz">
+            <thead><tr><th />{['X', 'Y', 'Z'].map((z) => <th key={z} className="num">{z}</th>)}</tr></thead>
+            <tbody>{['A', 'B', 'C'].map((a) => (
+              <tr key={a}><th>{a}</th>{['X', 'Y', 'Z'].map((z) => {
+                const k = a + z, m = r?.matriz?.[k];
+                return (
+                  <td key={k}><button type="button" className={'pot-celda ' + tono(k) + (f.clases.includes(k) ? ' on' : '')} aria-pressed={f.clases.includes(k)} onClick={() => alt('clases', k)}>
+                    <b>{k}</b><span>{m ? `${fmt(m.skus)} SKU` : '—'}</span><span>{m ? `${fmt(m.fuera)} u.` : ''}</span></button></td>
+                );
+              })}</tr>
+            ))}</tbody>
+          </table>
+          <p className="note" style={{ margin: '6px 0 0' }}>{r ? `Universo con los filtros: ${fmt(r.universo.skus)} SKU y ${fmt(r.universo.fuera)} u. fuera de ${osr}.` : ''}</p>
+        </div>
+        <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+          <div><label className="lbl" htmlFor="po-apt">Logística OSR</label>
+            <select id="po-apt" value={f.aptitud} onChange={(e) => set('aptitud')(e.target.value)}>
+              <option value="Y">Solo aptos (Y)</option><option value="REV">Aptos y en REVISION</option><option value="TODOS">Todos (incluye N)</option></select></div>
+          <div><label className="lbl" htmlFor="po-osr">Stock en {osr}</label>
+            <select id="po-osr" value={f.enOsr} onChange={(e) => set('enOsr')(e.target.value)}>
+              <option value="SIN">Solo SKU que no están en {osr}</option><option value="TODOS">Incluir los que ya tienen stock en {osr}</option></select></div>
+          <div><label className="lbl" htmlFor="po-min">Stock fuera mayor que</label><input id="po-min" type="number" className="w90" min="0" placeholder="0" value={f.minFuera} onChange={(e) => set('minFuera')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-vta">Venta/día mínima</label><input id="po-vta" type="number" className="w90" min="0" step="0.1" placeholder="0" value={f.minVenta} onChange={(e) => set('minVenta')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-ss">Stock seg. fuera (días)</label><input id="po-ss" type="number" className="w90" min="0" placeholder="7" value={f.ssDias} onChange={(e) => set('ssDias')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-ssm">Mínimo u. fuera</label><input id="po-ssm" type="number" className="w90" min="0" placeholder="0" value={f.ssMin} onChange={(e) => set('ssMin')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-max">Máximo de SKU</label><input id="po-max" type="number" className="w90" min="0" placeholder="sin tope" value={f.maxSkus} onChange={(e) => set('maxSkus')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-dias">Días de cobertura</label><input id="po-dias" type="number" className="w90" min="0" placeholder="todo" value={f.dias} onChange={(e) => set('dias')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="po-tote">Almacenamiento en {osr}</label>
+            <select id="po-tote" value={f.tote} onChange={(e) => set('tote')(e.target.value)}>
+              <option value="AUTO">Automático (enteros + quarter / half)</option><option value="QUARTER">Quarter (4 por tote)</option><option value="HALF">Half (2 por tote)</option><option value="ENTERO">Tote entero</option></select></div>
+          <div><label className="lbl" htmlFor="po-cap">Capacidad tote (u.)</label><input id="po-cap" type="number" className="w90" min="1" placeholder="por depto" value={f.capTote} onChange={(e) => set('capTote')(e.target.value)} /></div>
+          {r && <div><label className="lbl" htmlFor="po-evt">Evento (simulador)</label>
+            <select id="po-evt" value={f.evento} onChange={(e) => setF({ ...f, evento: e.target.value, depto: '' })}>
+              <option value="">Sin evento</option>{r.eventos.map((e) => <option key={e.clave} value={e.clave}>{e.evento} · {fFecha(e.inicio)}</option>)}</select></div>}
+          {f.evento && <div><label className="lbl" htmlFor="po-evm">Deptos del evento</label>
+            <select id="po-evm" value={f.evtModo} onChange={(e) => set('evtModo')(e.target.value)}><option value="PRIORIZAR">Priorizar (mayor factor primero)</option><option value="SOLO">Solo los potenciados</option></select></div>}
+          {f.evento && f.evtModo === 'SOLO' && <div><label className="lbl" htmlFor="po-evx">Factor mínimo</label>
+            <input id="po-evx" type="number" className="w90" min="0" step="0.1" placeholder={r?.evtGeneral ? `> ${fmt(r.evtGeneral, 2)}` : ''} value={f.evtMin} onChange={(e) => set('evtMin')(e.target.value)} /></div>}
+          <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.soloDeptosOsr} onChange={(e) => setF({ ...f, soloDeptosOsr: e.target.checked, depto: '' })} /> Solo deptos {osr}</label>
+          {r && <div>
+            <span className="lbl">CD de origen</span>
+            <div className="chips">{r.cds.map((cd) => <button key={cd} className="chip" aria-pressed={f.cds.includes(cd)} onClick={() => alt('cds', cd)}>{cd}</button>)}
+              {f.cds.length > 0 && <button className="chip" onClick={() => set('cds')([])}>Todos ✕</button>}</div>
+          </div>}
+          {cargando && <span className="note">Calculando…</span>}
+        </div>
+      </div>
+
+      {r && t && (
+        <>
+          <div className="grid-kpi" style={{ marginTop: 14 }}>
+            {tile('SKU a ingresar', fmt(t.skus), 'good', `${r.conf.maxSkus && t.fueraTope ? `máximo ${fmt(r.conf.maxSkus)} de ${fmt(t.candidatos)} candidatos (${fmt(t.ingresarTope)} u. quedan fuera del tope) · ` : ''}clases ${r.conf.clases.join(', ')}${t.porSS ? ` · ${fmt(t.porSS)} SKU sin disponible sobre el stock de seguridad` : ''}`)}
+            {tile(`A ingresar a ${osr}`, `${fmt(t.ingresar)} u.`, 'good', `de ${fmt(t.fuera)} u. fuera · quedan fuera ${fmt(t.queda)} u. (stock de seguridad ${fmt(t.ss)} u.)${r.conf.dias ? ` · tope ${r.conf.dias} días de venta` : ''}`)}
+            {tile('Ubicaciones de origen', fmt(t.ubic), '', r.porCd.map((c) => `${c.cd} ${fmt(c.unidades)} u.`).join(' · ') || '—')}
+            {tile(`Totes de ${osr} necesarios`, fmt(t.totes), 'good', `${t.ahorroTotes > 0 ? `${fmt(t.ahorroTotes)} totes menos que en tote entero (${fmt(t.totesEntero)})` : `igual que en tote entero (${fmt(t.totesEntero)})`} · ${fmt(t.mix.ENTERO)} enteros, ${fmt(t.mix.HALF)} half, ${fmt(t.mix.QUARTER)} quarter`)}
+            {tile('Venta que pasaría a OSR', `${fmt(t.ventaDia, 0)} u./día`, '', `${fmt(t.pctVenta * 100, 1)}% de la venta diaria de la Base${r.evento ? ` · ${fmt(t.ventaEvt, 0)} u./día en ${r.evento.evento}` : ''}`)}
+            {r.evento && tile(`Potenciados por ${r.evento.evento}`, fmt(t.potenciados), 'good', `SKU de deptos con factor ${r.conf.evtMin ? `≥ ${fmt(r.conf.evtMin, 2)}` : `sobre GENERAL (${fmt(r.evtGeneral, 2)})`} · ${fFecha(r.evento.inicio)} al ${fFecha(r.evento.fin)}`)}
+            {tile('Cobertura del ingreso', t.cob === null ? '—' : `${fmt(t.cob, 0)} días`, '', 'unidades a ingresar / venta diaria')}
+            {tile(`Participación de ${osr} en la venta`, `${fmt(r.balance.partAntes * 100, 1)}% → ${fmt(r.balance.partDespues * 100, 1)}%`, 'good', `hoy → con el escenario${r.noY.modo === 'RETIRAR' ? ' y el retiro de SKU sin Y' : ''}`)}
+          </div>
+
+          <fieldset className="pot-noy">
+            <legend>SKU en {osr} sin Logística OSR = "Y"</legend>
+            <p className="note" style={{ marginTop: 0 }}>Ocupan ubicaciones de {osr} sin estar habilitados. Elige qué estados y clases mirar y simula retirarlos: se liberan sus ubicaciones y se compara con lo que ingresa el escenario.</p>
+            <div className="row" style={{ alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+              <div>
+                <span className="lbl">Logística OSR</span>
+                <div className="chips">{Object.entries(r.noY.porEstado).map(([e, n]) => <button key={e} className="chip" aria-pressed={f.noYEstados.includes(e)} onClick={() => alt('noYEstados', e)}>{e} · {fmt(n)}</button>)}
+                  {!Object.keys(r.noY.porEstado).length && <span className="note">Todos los SKU en {osr} tienen "Y".</span>}</div>
+              </div>
+              <div>
+                <span className="lbl">Clases</span>
+                <div className="chips">{CLASES9.filter((k) => r.noY.matriz[k]).map((k) => <button key={k} className="chip" aria-pressed={f.noYClases.includes(k)} onClick={() => alt('noYClases', k)}>{k} · {fmt(r.noY.matriz[k])}</button>)}</div>
+              </div>
+              <div><label className="lbl" htmlFor="po-noy">Simulación</label>
+                <select id="po-noy" value={f.noYModo} onChange={(e) => set('noYModo')(e.target.value)}><option value="VER">Solo ver su impacto</option><option value="RETIRAR">Retirarlos de {osr}</option></select></div>
+            </div>
+            <p className="note" style={{ marginBottom: 6 }}>Sin chips marcados se consideran todos. {fmt(r.noY.tot.skus)} SKU · {fmt(r.noY.tot.osr)} u. en {osr} · {fmt(r.noY.tot.ubic)} ubicaciones ({fmt(r.noY.tot.libera)} quedan vacías al retirarlos) · venden {fmt(r.noY.tot.ventaDia, 1)} u./día ({fmt(r.noY.tot.pctVenta * 100, 2)}% de la venta).</p>
+            <table className="pot-balance">
+              <thead><tr><th>Balance del escenario en {osr}</th><th className="num">Entra</th><th className="num">Sale (sin Y)</th><th className="num">Neto</th></tr></thead>
+              <tbody>
+                <tr><td>Venta diaria</td><td className="num">{fmt(r.balance.ventaEntra, 1)}</td><td className="num">{fmt(r.balance.ventaSale, 1)}</td><td className="num"><b>{fmt(r.balance.ventaNeta, 1)}</b></td></tr>
+                <tr><td>Unidades</td><td className="num">{fmt(r.balance.unidEntra)}</td><td className="num">{fmt(r.balance.unidSale)}</td><td className="num"><b>{fmt(r.balance.unidNeta)}</b></td></tr>
+                <tr><td>Totes de {osr} (necesarios · se liberan)</td><td className="num">{fmt(r.balance.totesNecesarios)}</td><td className="num">{fmt(r.balance.ubicLibera)}</td>
+                  <td className="num" style={{ color: r.balance.ubicNeta < 0 ? 'var(--bad)' : 'var(--good)' }}><b>{r.balance.ubicNeta > 0 ? '+' : ''}{fmt(r.balance.ubicNeta)}</b></td></tr>
+              </tbody>
+            </table>
+            {r.noY.modo === 'VER' && <p className="note" style={{ marginBottom: 0 }}>Elige "Retirarlos de {osr}" para restar su venta y su ocupación en el balance.</p>}
+          </fieldset>
+
+          <div className="row spread" style={{ margin: '6px 0 8px' }}>
+            <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+              <div className="chips">
+                <button className="chip" aria-pressed={vista === 'sku'} onClick={() => setVista('sku')}>Por SKU · {fmt(r.filtrados)}</button>
+                <button className="chip" aria-pressed={vista === 'depto'} onClick={() => setVista('depto')}>Por departamento · {fmt(r.deptos.length)}</button>
+                <button className="chip" aria-pressed={vista === 'noy'} onClick={() => setVista('noy')}>En {osr} sin Y · {fmt(r.noY.filtrados)}</button>
+              </div>
+              {vista === 'sku' && <>
+                <input type="search" placeholder="Buscar SKU o descripción" value={f.buscar} onChange={(e) => set('buscar')(e.target.value)} style={{ width: 210 }} aria-label="Buscar SKU o descripción" />
+                <label className="inline" style={{ fontSize: 13 }}>Ordenar por
+                  <select value={f.orden} onChange={(e) => set('orden')(e.target.value)} style={{ width: 'auto', marginLeft: 6 }}>{ORDEN_POT.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+                {f.orden && <button className="btn sm" onClick={() => set('dir')(f.dir === 'asc' ? 'desc' : 'asc')}>{f.dir === 'asc' ? '▲ menor a mayor' : '▼ mayor a menor'}</button>}
+                <label className="inline" style={{ fontSize: 13 }}>Mostrar
+                  <select value={f.top} onChange={(e) => set('top')(e.target.value)} style={{ width: 'auto', marginLeft: 6 }}><option value="">Todos</option>{[10, 20, 50, 100].map((n) => <option key={n} value={n}>Top {n}</option>)}</select></label>
+              </>}
+            </div>
+            {f.depto && vista === 'sku' && <button className="chip" aria-pressed onClick={() => set('depto')('')}>{f.depto} ✕</button>}
+          </div>
+
+          {vista === 'noy' ? (
+            <>
+              <div className="tbl" style={{ maxHeight: 460 }}>
+                <table>
+                  <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th>Log. OSR</th><th className="num">Stock {osr}</th><th className="num">Ubic. {osr}</th><th className="num">Se liberan</th><th className="num">Stock fuera</th><th className="num">Venta/día</th></tr></thead>
+                  <tbody>{r.noY.detalle.map((x) => (
+                    <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td>
+                      <td className="wrap">{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></td><td>{x.aptitud}</td>
+                      <td className="num">{fmt(x.osr)}</td><td className="num">{fmt(x.ubic)}</td><td className="num">{fmt(x.libera)}</td>
+                      <td className="num">{x.fuera ? fmt(x.fuera) : <span className="muted">—</span>}</td><td className="num">{fmt(x.ventaDia, 1)}</td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <p className="note">Ordenados para retirar primero: clase C y menor venta. {r.noY.filtrados > r.noY.detalle.length ? `Se muestran ${fmt(r.noY.detalle.length)} de ${fmt(r.noY.filtrados)}; el Excel trae todos.` : ''}</p>
+            </>
+          ) : vista === 'depto' ? (
+            <>
+              <div className="tbl" style={{ maxHeight: 460 }}>
+                <table>
+                  <thead><tr><th>Depto</th>{r.evento && <><th>Categoría</th><th className="num">Factor</th></>}<th className="num">SKU</th><th className="num">Venta/día</th>{cdsVer.map((cd) => <th key={cd} className="num">Fuera {cd}</th>)}
+                    <th className="num">Stock fuera</th><th className="num">Stock seg.</th><th className="num">A ingresar</th><th className="num">Ubic.</th><th className="num">Totes {osr}</th><th>Clases</th></tr></thead>
+                  <tbody>
+                    {r.deptos.map((d) => (
+                      <tr key={d.depto} style={{ cursor: 'pointer' }} onClick={() => { setF({ ...f, depto: d.depto }); setVista('sku'); }} title="Ver los SKU de este depto">
+                        <td>{d.depto}{d.enLista && <span className="tag" style={{ marginLeft: 6 }}>{osr}</span>}</td>
+                        {r.evento && <><td className="note">{d.categoria}</td><td className="num"><b>×{fmt(d.factor, 2)}</b></td></>}<td className="num">{fmt(d.skus)}</td><td className="num">{fmt(d.ventaDia, 1)}</td>
+                        {cdsVer.map((cd) => <td key={cd} className="num">{d.porCd[cd] ? fmt(d.porCd[cd]) : <span className="muted">—</span>}</td>)}
+                        <td className="num">{fmt(d.fuera)}</td><td className="num">{fmt(d.ss)}</td><td className="num"><b>{fmt(d.ingresar)}</b></td><td className="num">{fmt(d.ubic)}</td><td className="num" title={`En tote entero: ${fmt(d.totesEntero)}`}>{fmt(d.totes, 1)}</td>
+                        <td>{CLASES9.filter((k) => d.clases[k]).map((k) => <span key={k} className={'pill ' + tono(k)} style={{ marginRight: 4 }}>{k} {fmt(d.clases[k])}</span>)}</td>
+                      </tr>
+                    ))}
+                    <tr className="tot"><td>Total</td>{r.evento && <><td /><td /></>}<td className="num">{fmt(t.skus)}</td><td className="num">{fmt(t.ventaDia, 1)}</td>
+                      {cdsVer.map((cd) => <td key={cd} className="num">{fmt(r.porCd.find((c) => c.cd === cd)?.unidades || 0)}</td>)}
+                      <td className="num">{fmt(t.fuera)}</td><td className="num">{fmt(t.ss)}</td><td className="num">{fmt(t.ingresar)}</td><td className="num">{fmt(t.ubic)}</td><td className="num">{fmt(t.totes)}</td><td /></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="note">Departamentos ordenados por unidades a ingresar. Clic en un depto para ver sus SKU.</p>
+            </>
+          ) : (
+            <>
+              <div className="tbl" style={{ maxHeight: 460 }}>
+                <table>
+                  <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th>Log. OSR</th><th className="num">En {osr}</th>{cdsVer.map((cd) => <th key={cd} className="num">{cd}</th>)}
+                    <th className="num">Stock fuera</th><th className="num">Stock seg.</th><th className="num">A ingresar</th><th className="num">Queda fuera</th><th className="num">Ubic. a tomar</th><th className="num">Venta/día</th>{r.evento && <th className="num">Factor</th>}<th className="num">Cobertura</th><th>Almacenamiento {osr}</th><th className="num">Totes</th></tr></thead>
+                  <tbody>{r.detalle.map((x) => (
+                    <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td>
+                      <td className="wrap">{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></td><td>{x.aptitud}</td>
+                      <td className="num">{x.osr ? fmt(x.osr) : <span className="muted">—</span>}</td>
+                      {cdsVer.map((cd) => <td key={cd} className="num">{x.porCd[cd] ? fmt(x.porCd[cd]) : <span className="muted">—</span>}</td>)}
+                      <td className="num">{fmt(x.fuera)}</td><td className="num">{fmt(x.ss)}</td><td className="num"><b>{fmt(x.ingresar)}</b></td><td className="num">{fmt(x.queda)}</td><td className="num">{fmt(x.nUb)}</td>
+                      <td className="num">{fmt(x.ventaDia, 1)}</td>{r.evento && <td className="num" title={x.categoria}>×{fmt(x.factor, 2)}</td>}<td className="num">{x.cob === null ? 'sin venta' : `${fmt(x.cob, 0)} d`}</td>
+                      <td className="note" title={`Capacidad tote entero: ${fmt(x.cap)} u.`}>{x.almac}</td><td className="num">{fmt(x.totes, 2)}</td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU. El Excel trae todos, con cada ubicación de origen.</p>}
+              {!r.filtrados && <p className="note">Ningún SKU cumple el escenario. Prueba con más clases o filtros menos exigentes.</p>}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================================
+// Optimización de totes: ocupación actual de OSR, reempaque en quarter / half, tope de días en OSR y uso de lo liberado
+// =============================================================================================
+const ORDEN_TOT = [['', 'Totes liberados'], ['totesHoy', 'Totes hoy (más totes)'], ['ubic', 'Compartimentos'], ['unid', 'Unidades'], ['llenado', 'Utilización'], ['devolver', 'Vuelven a otro CD'], ['cobOsr', 'Días de cobertura en OSR'], ['ventaDia', 'Venta/día']];
+
+const NOM_TIPO = { ENTERO: 'Full', HALF: 'Half', QUARTER: 'Quarter' };
+
+function BarraUtil({ v }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, minWidth: 50, height: 8, borderRadius: 4, background: 'var(--empty)', overflow: 'hidden' }}>
+        <div style={{ width: `${Math.min(100, v * 100)}%`, height: '100%', background: v < 0.6 ? 'var(--yellow)' : 'var(--green)' }} /></div>
+      <b style={{ minWidth: 38, textAlign: 'right' }}>{fmt(v * 100, 0)}%</b>
+    </div>
+  );
+}
+
+// utilización por tipo de tote de cada depto; clic en el encabezado ordena, clic en el depto filtra la vista por SKU
+function TipoPorDepto({ deptos, ord, setOrd, onDepto }) {
+  const val = (d, k) => {
+    if (k === 'depto') return d.depto;
+    if (k === 'bajo50') return d.porTipo.reduce((s, p) => s + p.rangos[0] + p.rangos[1], 0);
+    const [t, c] = k.split('.');
+    return c ? d.porTipo.find((p) => p.tipo === t)[c] : d[k];
+  };
+  const l = [...deptos].sort((a, b) => {
+    const va = val(a, ord.k), vb = val(b, ord.k);
+    return ord.dir * (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb)));
+  });
+  const th = (k, txt, cls = 'num', extra = {}) => (
+    <th key={k} className={cls} style={{ whiteSpace: 'nowrap', ...extra }} aria-sort={ord.k === k ? (ord.dir > 0 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="th-ord" onClick={() => setOrd({ k, dir: ord.k === k ? -ord.dir : k === 'depto' ? 1 : -1 })} title="Ordenar">
+        {txt}<span className="flecha" aria-hidden="true">{ord.k === k ? (ord.dir > 0 ? '▲' : '▼') : '↕'}</span></button></th>
+  );
+  return (
+    <div className="tbl tipo-dep" style={{ marginBottom: 6, maxHeight: 460 }}>
+      <table>
+        <thead>
+          <tr className="th-g"><th colSpan={4} className="grp">Departamento</th>{Object.keys(NOM_TIPO).map((t) => <th key={t} colSpan={2} className="grp sep">{NOM_TIPO[t]}</th>)}<th colSpan={2} className="grp sep">Optimización</th></tr>
+          <tr className="th-2">{th('depto', 'Departamento', '')}{th('skus', 'SKU')}{th('totesHoy', 'Totes')}{th('llenado', 'Utilización', '', { minWidth: 130 })}
+            {Object.keys(NOM_TIPO).flatMap((t) => [th(`${t}.comps`, 'Compart.', 'num sep'), th(`${t}.utilizacion`, 'Utiliz.', '', { minWidth: 110 })])}
+            {th('bajo50', 'Compart. < 50%', 'num sep')}{th('totesOpt', 'Totes reempaque')}</tr>
+        </thead>
+        <tbody>
+          {l.map((d) => (
+            <tr key={d.depto}>
+              <td className="wrap"><a href="#" onClick={(e) => { e.preventDefault(); onDepto(d.depto); }} title="Ver los SKU del depto">{d.depto}</a></td>
+              <td className="num">{fmt(d.skus)}</td><td className="num">{fmt(d.totesHoy, 0)}</td><td><BarraUtil v={d.llenado} /></td>
+              {d.porTipo.map((p) => [
+                <td key={p.tipo + 'c'} className="num sep">{p.comps ? fmt(p.comps) : <span className="muted">—</span>}</td>,
+                <td key={p.tipo + 'u'}>{p.comps ? <BarraUtil v={p.utilizacion} /> : <span className="muted">—</span>}</td>])}
+              <td className="num sep">{fmt(val(d, 'bajo50'))}</td><td className="num">{fmt(d.totesOpt, 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TotesOsr() {
+  const [f, setF] = useState({ tote: 'AUTO', capTote: '', maxDias: '', minOsr: '', minTotes: '', clases: [], aptitud: '', potClases: ['AX', 'AY', 'BX', 'BY'], depto: '', buscar: '', orden: '', dir: 'desc', top: '',
+    temporadas: [], evento: 'NINGUNO', evtMin: '', filtroEvento: '', proteger: false, tempProteger: [] });
+  const [vista, setVista] = useState('sku');
+  const [vTipo, setVTipo] = useState('total');
+  const [ordTipo, setOrdTipo] = useState({ k: 'totesHoy', dir: -1 });
+  const cuerpo = { ...f, pot: { clases: f.potClases } };
+  const [r, cargando] = useSimulacion('/api/optimizacion/osr/totes', cuerpo, [JSON.stringify(f)]);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const alt = (k, v) => set(k)(f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v]);
+  const osr = r?.osr || 'OSR';
+  const t = r?.tot, u = r?.uso;
+  const excel = urlApi('/api/optimizacion/osr/totes/excel' + qs({ tote: f.tote, capTote: f.capTote, maxDias: f.maxDias, minOsr: f.minOsr, minTotes: f.minTotes, clases: f.clases.join(','), aptitud: f.aptitud,
+    temporadas: f.temporadas.join('|'), evento: f.evento, evtMin: f.evtMin, filtroEvento: f.filtroEvento, proteger: f.proteger ? '1' : '', tempProteger: f.tempProteger.join('|'), pot: JSON.stringify({ clases: f.potClases }) }));
+  const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>Optimización de totes de {osr}</h2>
+        {r && <a className="btn primary" href={excel}>Exportar a Excel</a>}
+      </div>
+      {r?.fuente && (r.fuente.tipo === 'DISTRIBUCION'
+        ? <div className="alert good">Ocupación real del {osr}: distribución de totes {r.fuente.archivo} cargada el {fFecha(r.fuente.cargado)} ({fmt(r.fuente.skus)} SKU).{r.tot.sinBase ? ` ${fmt(r.tot.sinBase)} SKU no están en la Base de stock (sin clase ni venta).` : ''} <IrACarga id="osrtotes" etiqueta="Reemplazar (en Datos)" /></div>
+        : <div className="alert warn">Sin distribución de totes: se asume que cada ubicación de {osr} de la Base es un tote entero. <IrACarga id="osrtotes" etiqueta="Cargar distribución de totes (en Datos)" /></div>)}
+      <p className="note" style={{ marginTop: -2 }}>Con la distribución de totes cargada se usan los compartimentos reales de cada SKU (full, half = ½ tote, quarter = ¼ tote); si no, cada ubicación de {osr} es un tote entero. Se simula reempacar cada SKU en quarter / half (los compartimentos de distintos SKU comparten tote) y, si se indica, dejar en {osr} solo N días de venta: el resto vuelve a otro CD. Los totes que se liberan se ofrecen a los SKU de afuera de las clases elegidas, con los criterios del Potencial fuera de {osr} (stock de seguridad 7 días, sin RCI).</p>
+
+      <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,auto) minmax(0,1fr)', alignItems: 'start' }}>
+        <div>
+          <span className="lbl">SKU de {osr} a analizar (clic; vacío = todos)</span>
+          <table className="pot-matriz">
+            <thead><tr><th />{['X', 'Y', 'Z'].map((z) => <th key={z} className="num">{z}</th>)}</tr></thead>
+            <tbody>{['A', 'B', 'C'].map((a) => (
+              <tr key={a}><th>{a}</th>{['X', 'Y', 'Z'].map((z) => {
+                const k = a + z, m = r?.matriz?.[k];
+                const on = !f.clases.length || f.clases.includes(k);
+                return (
+                  <td key={k}><button type="button" className={'pot-celda ' + tono(k) + (on ? ' on' : '')} aria-pressed={f.clases.includes(k)} onClick={() => alt('clases', k)}>
+                    <b>{k}</b><span>{m ? `${fmt(m.skus)} SKU` : '—'}</span><span>{m ? `${fmt(m.totes)} totes` : ''}</span></button></td>
+                );
+              })}</tr>
+            ))}</tbody>
+          </table>
+        </div>
+        <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+          <div><label className="lbl" htmlFor="to-tote">Reempacar en</label>
+            <select id="to-tote" value={f.tote} onChange={(e) => set('tote')(e.target.value)}>
+              <option value="AUTO">Automático (enteros + quarter / half)</option><option value="QUARTER">Quarter (4 por tote)</option><option value="HALF">Half (2 por tote)</option><option value="ENTERO">Tote entero</option></select></div>
+          <div><label className="lbl" htmlFor="to-cap">Capacidad tote (u.)</label><input id="to-cap" type="number" className="w90" min="1" placeholder="por depto" value={f.capTote} onChange={(e) => set('capTote')(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="to-dias">Tope en {osr} (días de venta)</label><input id="to-dias" type="number" className="w90" min="0" placeholder="sin tope" value={f.maxDias} onChange={(e) => set('maxDias')(e.target.value)} /></div>
+          {f.maxDias !== '' && <div><label className="lbl" htmlFor="to-min">Mínimo u. en {osr}</label><input id="to-min" type="number" className="w90" min="0" placeholder="0" value={f.minOsr} onChange={(e) => set('minOsr')(e.target.value)} /></div>}
+          <div><label className="lbl" htmlFor="to-apt">Logística OSR</label>
+            <select id="to-apt" value={f.aptitud} onChange={(e) => set('aptitud')(e.target.value)}><option value="">Todos</option><option value="Y">Solo Y</option><option value="NOY">Sin Y (N, REVISION…)</option></select></div>
+          <div><label className="lbl" htmlFor="to-mt">SKU con más de N totes</label><input id="to-mt" type="number" className="w90" min="0" placeholder="0" value={f.minTotes} onChange={(e) => set('minTotes')(e.target.value)} /></div>
+          <div>
+            <span className="lbl">Ingresar con lo liberado</span>
+            <div className="chips">{CLASES9.map((k) => <button key={k} className="chip" aria-pressed={f.potClases.includes(k)} onClick={() => alt('potClases', k)}>{k}</button>)}</div>
+          </div>
+          {r && <div>
+            <span className="lbl">Temporada (vacío = todas)</span>
+            <div className="chips">{r.temporadas.map((x) => <button key={x.temporada} className="chip" aria-pressed={f.temporadas.includes(x.temporada)} onClick={() => alt('temporadas', x.temporada)}>{x.temporada} · {fmt(x.skus)}</button>)}</div>
+          </div>}
+          {r && <div><label className="lbl" htmlFor="to-evt">Evento (simulador)</label>
+            <select id="to-evt" value={f.evento} onChange={(e) => setF({ ...f, evento: e.target.value, filtroEvento: e.target.value === 'NINGUNO' ? '' : f.filtroEvento, proteger: e.target.value === 'NINGUNO' ? false : f.proteger })}>
+              <option value="NINGUNO">Ninguno (sin evento ni Pro_Evt)</option><option value="">{r.proy ? `Proyección Pro_Evt: ${r.proy.evento}` : "Sin evento del simulador"}</option>{r.eventos.map((e) => <option key={e.clave} value={e.clave}>{e.evento} · {fFecha(e.inicio)}</option>)}</select></div>}
+          {f.evento && f.evento !== 'NINGUNO' && <div><label className="lbl" htmlFor="to-evx">Factor mínimo</label>
+            <input id="to-evx" type="number" className="w90" min="0" step="0.1" placeholder={r?.evtGeneral ? `> ${fmt(r.evtGeneral, 2)}` : ''} value={f.evtMin} onChange={(e) => set('evtMin')(e.target.value)} /></div>}
+          {(r?.evento || r?.proy) && <div><label className="lbl" htmlFor="to-fe">SKU del evento</label>
+            <select id="to-fe" value={f.filtroEvento} onChange={(e) => set('filtroEvento')(e.target.value)}><option value="">Todos</option><option value="EVENTO">Solo los del evento</option><option value="NO">Solo los que no son del evento</option></select></div>}
+          {f.maxDias !== '' && <div>
+            <span className="lbl">No reducir con el tope</span>
+            <div className="chips">
+              {(r?.evento || r?.proy) && <button className="chip" aria-pressed={f.proteger} onClick={() => set('proteger')(!f.proteger)}>SKU del evento</button>}
+              {(r?.temporadas || []).map((x) => <button key={x.temporada} className="chip" aria-pressed={f.tempProteger.includes(x.temporada)} onClick={() => alt('tempProteger', x.temporada)}>{x.temporada}</button>)}
+            </div>
+          </div>}
+          {cargando && <span className="note">Calculando…</span>}
+        </div>
+      </div>
+
+      {r && t && u && (
+        <>
+          <div className="grid-kpi" style={{ marginTop: 14 }}>
+            {tile(`Stock en ${osr}`, `${fmt(t.unid)} u.`, '', `${fmt(t.skus)} SKU analizados · ${fmt(t.unidOsr)} u. en todo ${osr}`)}
+            {tile(`Totes ocupados en ${osr}`, fmt(t.totesHoy), '', `${fmt(t.hoyTipos.ENTERO)} full · ${fmt(t.hoyTipos.HALF)} half · ${fmt(t.hoyTipos.QUARTER)} quarter · ${fmt(t.totesOsr)} totes en todo ${osr}`)}
+            {tile('% de utilización', `${fmt(t.llenado * 100, 0)}%`, t.llenado < 0.6 ? 'warn' : 'good', `unidades / capacidad de los totes que ocupan · mediana ${fmt(t.medianaUnid)} u. por tote`)}
+            {tile('Totes optimizados', fmt(t.totesOpt), 'good', `${fmt(t.mix.ENTERO)} enteros, ${fmt(t.mix.HALF)} half, ${fmt(t.mix.QUARTER)} quarter${t.devolver ? ` · ${fmt(t.devolver)} u. vuelven a otro CD` : ''}`)}
+            {tile('Totes que se liberan', fmt(t.libera), 'good', `${fmt(t.totesHoy ? (t.libera / t.totesHoy) * 100 : 0, 0)}% de los totes analizados`)}
+            {tile(`SKU de afuera que entran`, `${fmt(u.entran)} de ${fmt(u.candidatos)}`, u.faltan ? 'warn' : 'good',
+              `${u.clases.join(', ')} · usan ${fmt(u.totesUsados)} totes, ${fmt(u.unid)} u., ${fmt(u.ventaDia, 0)} u./día${u.faltan ? ` · faltan ${fmt(u.faltan)} totes para todos` : ` · sobran ${fmt(u.sobran)} totes`}`)}
+          </div>
+          <p className="note" style={{ marginTop: -6 }}>Entran: {CLASES9.filter((k) => u.porClase[k]).map((k) => `${k} ${fmt(u.porClase[k])}`).join(' · ') || '—'}.</p>
+          <div className="row" style={{ alignItems: 'center', gap: 12, margin: '4px 0 6px' }}>
+            <h3 style={{ margin: 0 }}>Utilización por tipo de tote</h3>
+            <div className="chips">
+              <button className="chip" aria-pressed={vTipo === 'total'} onClick={() => setVTipo('total')}>Total</button>
+              <button className="chip" aria-pressed={vTipo === 'depto'} onClick={() => setVTipo('depto')}>Por departamento · {fmt(r.deptos.length)}</button>
+            </div>
+          </div>
+          {vTipo === 'depto' ? <TipoPorDepto deptos={r.deptos} ord={ordTipo} setOrd={setOrdTipo} onDepto={(d) => { set('depto')(d); setVista('sku'); }} /> : <div className="tbl" style={{ marginBottom: 6 }}>
+            <table>
+              <thead><tr><th>Tipo</th><th className="num">Compartimentos</th><th className="num">Equiv. totes</th><th className="num">% de los totes</th><th className="num">SKU</th><th className="num">Solo este tipo</th>
+                <th className="num">Unidades</th><th className="num">U. por compart.</th><th style={{ minWidth: 150 }}>Utilización</th>
+                <th className="num">&lt; 25%</th><th className="num">25-50%</th><th className="num">50-80%</th><th className="num">≥ 80%</th><th className="num">Tras reempaque</th></tr></thead>
+              <tbody>
+                {t.porTipo.map((p) => (
+                  <tr key={p.tipo}>
+                    <td><b>{{ ENTERO: 'Full (1 tote)', HALF: 'Half (½ tote)', QUARTER: 'Quarter (¼ tote)' }[p.tipo]}</b></td>
+                    <td className="num">{fmt(p.comps)}</td><td className="num">{fmt(p.totes)}</td><td className="num">{fmt(t.totesHoy ? (p.totes / t.totesHoy) * 100 : 0, 0)}%</td>
+                    <td className="num">{fmt(p.skus)}</td><td className="num">{fmt(p.soloTipo)}</td><td className="num">{fmt(p.unid)}</td><td className="num">{fmt(p.comps ? p.unid / p.comps : 0, 1)}</td>
+                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--empty)', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min(100, p.utilizacion * 100)}%`, height: '100%', background: p.utilizacion < 0.6 ? 'var(--yellow)' : 'var(--green)' }} /></div>
+                      <b style={{ minWidth: 38, textAlign: 'right' }}>{fmt(p.utilizacion * 100, 0)}%</b></div></td>
+                    {p.rangos.map((n, i) => <td key={i} className="num">{n ? fmt(n) : <span className="muted">—</span>}</td>)}
+                    <td className="num">{fmt(p.opt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>}
+          <p className="note" style={{ marginTop: 0 }}>Las unidades de cada SKU se reparten entre sus compartimentos según el tamaño (full 1, half ½, quarter ¼); la utilización compara esas unidades con la capacidad del espacio. Los rangos cuentan compartimentos según el llenado de su SKU. «Tras reempaque» = compartimentos de ese tipo con el almacenamiento simulado.</p>
+          <div className="alert" style={{ marginTop: 0 }}>
+            <b>Fuera de AX · AY · BX · BY:</b> {fmt(t.fuera4.skus)} SKU en {fmt(t.fuera4.totes)} totes ({fmt(t.fuera4.unid)} u.; {fmt(t.fuera4.sinVenta)} sin venta).{' '}
+            {(r.evento || r.proy)
+              ? <>De ellos, <b>{fmt(t.fuera4.evento)} SKU ({fmt(t.fuera4.totesEvento)} totes) son del {r.evento ? `evento ${r.evento.evento}` : `Pro_Evt ${r.proy.evento}`}</b>{r.evento ? ` (deptos con factor ${r.conf.evtMin ? `≥ ${fmt(r.conf.evtMin, 2)}` : `sobre GENERAL ${fmt(r.evtGeneral, 2)}`})` : ''}: conviene mantenerlos para el evento; los otros {fmt(t.fuera4.skus - t.fuera4.evento)} ({fmt(t.fuera4.totes - t.fuera4.totesEvento)} totes) son los candidatos a liberar.</>
+              : 'Elige un evento (o carga la proyección Pro_Evt) para ver cuáles corresponden al evento.'}
+            {t.protegidos > 0 && ` · ${fmt(t.protegidos)} SKU protegidos del tope.`}
+          </div>
+
+          <div className="row spread" style={{ margin: '6px 0 8px' }}>
+            <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+              <div className="chips">
+                <button className="chip" aria-pressed={vista === 'sku'} onClick={() => setVista('sku')}>SKU en {osr} · {fmt(r.filtrados)}</button>
+                <button className="chip" aria-pressed={vista === 'depto'} onClick={() => setVista('depto')}>Por departamento · {fmt(r.deptos.length)}</button>
+                <button className="chip" aria-pressed={vista === 'entran'} onClick={() => setVista('entran')}>SKU que entran · {fmt(u.entran)}</button>
+              </div>
+              {vista === 'sku' && <>
+                <input type="search" placeholder="Buscar SKU o descripción" value={f.buscar} onChange={(e) => set('buscar')(e.target.value)} style={{ width: 210 }} aria-label="Buscar SKU o descripción" />
+                <label className="inline" style={{ fontSize: 13 }}>Ordenar por
+                  <select value={f.orden} onChange={(e) => set('orden')(e.target.value)} style={{ width: 'auto', marginLeft: 6 }}>{ORDEN_TOT.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+                {f.orden && <button className="btn sm" onClick={() => set('dir')(f.dir === 'asc' ? 'desc' : 'asc')}>{f.dir === 'asc' ? '▲ menor a mayor' : '▼ mayor a menor'}</button>}
+                <label className="inline" style={{ fontSize: 13 }}>Mostrar
+                  <select value={f.top} onChange={(e) => set('top')(e.target.value)} style={{ width: 'auto', marginLeft: 6 }}><option value="">Todos</option>{[10, 20, 50, 100].map((n) => <option key={n} value={n}>Top {n}</option>)}</select></label>
+              </>}
+            </div>
+            {f.depto && vista === 'sku' && <button className="chip" aria-pressed onClick={() => set('depto')('')}>{f.depto} ✕</button>}
+          </div>
+
+          {vista === 'depto' && (
+            <div className="tbl" style={{ maxHeight: 460 }}>
+              <table>
+                <thead><tr><th>Depto</th><th className="num">SKU</th><th className="num">Totes hoy</th><th className="num">Unidades</th><th className="num">Vuelven a otro CD</th><th className="num">Totes optimizados</th><th className="num">Se liberan</th></tr></thead>
+                <tbody>{r.deptos.map((d) => (
+                  <tr key={d.depto} style={{ cursor: 'pointer' }} onClick={() => { setF({ ...f, depto: d.depto }); setVista('sku'); }} title="Ver los SKU de este depto">
+                    <td>{d.depto}</td><td className="num">{fmt(d.skus)}</td><td className="num">{fmt(d.totesHoy)}</td><td className="num">{fmt(d.unid)}</td>
+                    <td className="num">{d.devolver ? fmt(d.devolver) : <span className="muted">—</span>}</td><td className="num">{fmt(d.totesOpt, 1)}</td><td className="num"><b>{fmt(d.libera, 1)}</b></td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          {vista === 'sku' && (
+            <>
+              <div className="tbl" style={{ maxHeight: 460 }}>
+                <table>
+                  <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th>Temporada</th>{(r.evento || r.proy) && <th>Evento</th>}<th>Log. OSR</th><th className="num">Full</th><th className="num">Half</th><th className="num">Quarter</th><th className="num">Totes hoy</th><th className="num">Unidades</th><th className="num">Capacidad</th><th className="num">Utilización</th>
+                    <th className="num">Venta/día</th><th className="num">Cobertura</th>{t.devolver > 0 && <><th className="num">Quedan</th><th className="num">Vuelven</th></>}<th>Reempaque</th><th className="num">Totes</th><th className="num">Libera</th></tr></thead>
+                  <tbody>{r.detalle.map((x) => (
+                    <tr key={x.sku}><td>{x.matriz ? <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span> : <span className="muted">—</span>}</td><td className="mono">{x.sku}</td>
+                      <td className="wrap">{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></td><td className="note">{x.temporada}</td>
+                      {(r.evento || r.proy) && <td>{x.esEvento ? <span className="pill m-0" title={x.categoria}>{r.evento ? `Sí ×${fmt(x.factor, 2)}` : 'Pro_Evt'}</span> : <span className="muted">No</span>}{x.protegido && <div className="note" style={{ margin: 0 }}>protegido</div>}</td>}
+                      <td>{x.log}</td>
+                      <td className="num">{x.hoy.ENTERO || <span className="muted">—</span>}</td><td className="num">{x.hoy.HALF || <span className="muted">—</span>}</td><td className="num">{x.hoy.QUARTER || <span className="muted">—</span>}</td>
+                      <td className="num">{fmt(x.totesHoy, 2)}</td><td className="num">{fmt(x.unid)}</td><td className="num">{fmt(x.cap)}</td>
+                      <td className="num" style={{ color: x.llenado < 0.25 ? 'var(--bad)' : x.llenado < 0.5 ? 'var(--warn)' : undefined }}>{fmt(x.llenado * 100, 0)}%</td>
+                      <td className="num">{fmt(x.ventaDia, 1)}</td><td className="num">{x.cobOsr === null ? 'sin venta' : `${fmt(x.cobOsr, 0)} d`}</td>
+                      {t.devolver > 0 && <><td className="num">{fmt(x.queda)}</td><td className="num">{x.devolver ? fmt(x.devolver) : <span className="muted">—</span>}</td></>}
+                      <td className="note">{x.almac || 'sale de OSR'}</td><td className="num">{fmt(x.totesOpt, 2)}</td><td className="num"><b>{fmt(x.libera, 2)}</b></td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              {r.filtrados > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filtrados)} SKU. El Excel trae todos.</p>}
+            </>
+          )}
+          {vista === 'entran' && (
+            <>
+              <div className="tbl" style={{ maxHeight: 460 }}>
+                <table>
+                  <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Stock fuera</th><th className="num">A ingresar</th><th>Almacenamiento</th><th className="num">Totes</th><th className="num">Venta/día</th></tr></thead>
+                  <tbody>{r.entran.map((x) => (
+                    <tr key={x.sku}><td><span className={'pill ' + tono(x.matriz)}>{x.matriz}</span></td><td className="mono">{x.sku}</td>
+                      <td className="wrap">{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></td><td className="num">{fmt(x.fuera)}</td>
+                      <td className="num"><b>{fmt(x.ingresar)}</b></td><td className="note">{x.almac}</td><td className="num">{fmt(x.totes, 2)}</td><td className="num">{fmt(x.ventaDia, 1)}</td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <p className="note">SKU de afuera en el orden del Potencial fuera de {osr} (clase A y más venta) que caben en los totes liberados. Para ajustar stock de seguridad, evento o máximo de SKU usa esa pestaña.</p>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const PESTANAS = [['eventos', 'Simulador de eventos'], ['reabasto', 'Reabasto por proyección'], ['potencial', 'Potencial fuera de OSR'], ['totes', 'Optimización de totes'], ['rotacion', 'Ingreso de alta rotación']];
 
 export default function AbastecimientoOsrVista() {
   const [vista, setVista] = useState('reabasto');
@@ -503,6 +973,8 @@ export default function AbastecimientoOsrVista() {
       </div>
       {vista === 'eventos' && <SimuladorEventos />}
       {vista === 'reabasto' && <ReabastoProyeccion />}
+      {vista === 'potencial' && <PotencialOsr />}
+      {vista === 'totes' && <TotesOsr />}
       {vista === 'rotacion' && <IngresoOsr />}
     </>
   );

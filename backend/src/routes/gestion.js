@@ -16,6 +16,8 @@ import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, conso
 import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbastecimiento } from '../gestion/services/abastecimientoOsr.js';
 import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
+import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
+import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
@@ -131,6 +133,18 @@ app.post('/abcxyz/historia', subir.single('archivo'), r(async (req) => {
 app.delete('/abcxyz/historia', r(() => borrarHistoria()));
 app.get('/optimizacion', r(() => optimizacion()));
 app.post('/optimizacion/osr/simular', r((req) => simularOsr(req.body || {})));
+app.post('/optimizacion/osr/potencial', r((req) => potencialOsr(req.body || {})));
+app.post('/optimizacion/osr/totes', r((req) => totesOsr(req.body || {})));
+app.post('/optimizacion/osr/totes/distribucion', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el archivo con la distribución de totes del OSR.'), { status: 400 });
+  return cargarDistribucionOsr(req.file.buffer, nombreArchivo(req.file));
+}));
+app.post('/optimizacion/osr/totes/distribucion/borrar', r(() => borrarDistribucionOsr()));
+app.get('/optimizacion/osr/totes/excel', r(async (req, res) => {
+  const q2 = { ...req.query, pot: req.query.pot ? JSON.parse(req.query.pot) : {} };
+  return enviarXlsx(res, await archivoTotesOsr(q2));
+}));
+app.get('/optimizacion/osr/potencial/excel', r(async (req, res) => enviarXlsx(res, await archivoPotencialOsr(req.query))));
 app.post('/optimizacion/osr/generar', r((req) => generarIngresoOsr(req.body || {})));
 app.post('/optimizacion/consolidacion/simular', r((req) => consolidacionCds(req.body || {})));
 app.get('/optimizacion/consolidacion/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionCds(req.query))));

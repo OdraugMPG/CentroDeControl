@@ -150,7 +150,7 @@ export async function borrarProyeccion() {
   return { ok: true };
 }
 
-async function leerProyeccion() {
+export async function leerProyeccion() {
   const { rows } = await q('SELECT valor FROM parametros WHERE clave = $1', [CLAVE]);
   try { return rows[0] ? JSON.parse(rows[0].valor) : null; } catch { return null; }
 }

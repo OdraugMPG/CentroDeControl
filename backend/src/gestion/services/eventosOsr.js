@@ -83,6 +83,27 @@ function categoriaTexto(texto, categorias) {
 }
 const normEsp = (s) => txt(s).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
+/**
+ * Factor de un evento por depto, según la categoría del depto (asignada o sugerida por su nombre). Una categoría sin
+ * factor para el evento toma el de GENERAL. Lo usa el Potencial fuera de OSR para potenciar los deptos del evento.
+ */
+export async function factoresEvento(clave) {
+  const cfg = await configEventos();
+  const k = normTxt(clave);
+  const evento = cfg.eventos.find((e) => normTxt(e.clave) === k) || null;
+  const fac = new Map(cfg.categorias.filter((c) => c.factores && k in c.factores).map((c) => [c.categoria, Number(c.factores[k]) || 0]));
+  const general = fac.has('GENERAL') ? fac.get('GENERAL') : 1;
+  const cache = new Map();
+  const deDepto = (depto) => {
+    if (!cache.has(depto)) {
+      const categoria = cfg.deptos[depto] || categoriaTexto(depto, cfg.categorias);
+      cache.set(depto, { categoria, factor: fac.has(categoria) ? fac.get(categoria) : general });
+    }
+    return cache.get(depto);
+  };
+  return { eventos: cfg.eventos.map((e) => ({ clave: e.clave, evento: e.evento, inicio: e.inicio, fin: e.fin })), evento, general, deDepto };
+}
+
 /** Paso 2: deptos de la Base con la categoría asignada (o sugerida), si son deptos OSR y cuántos SKU tienen. */
 export async function deptosEventos() {
   const [{ p, skus }, cfg] = await Promise.all([baseSku(), configEventos()]);

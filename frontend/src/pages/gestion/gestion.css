@@ -221,3 +221,18 @@
 .gd .flt-campo{display:inline-flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
 .gd .flt-campo select,.gd .flt-campo input{text-transform:none;letter-spacing:0;font-weight:400;padding:5px 8px;font-size:13px}
 .gd .w70{width:70px}
+/* matriz ABC/XYZ seleccionable (Potencial fuera de OSR) */
+.gd .pot-matriz{border-collapse:separate;border-spacing:4px;margin-top:4px}
+.gd .pot-matriz th{font-size:12px;color:var(--muted);padding:0 4px;border:0;text-align:center}
+.gd .pot-matriz td{padding:0;border:0}
+.gd .pot-celda{cursor:pointer;width:104px;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:6px 8px;border-radius:6px;border:2px solid transparent;font-size:12px;opacity:.45;text-align:left;color:var(--ink)}
+.gd .pot-celda b{font-size:13px}
+.gd .pot-celda.on{opacity:1;border-color:var(--accent)}
+.gd .pot-noy{border:1px solid var(--line);border-radius:8px;padding:10px 14px 12px;margin:0 0 14px}
+.gd .pot-noy legend{font-weight:600;padding:0 6px}
+.gd .pot-balance{max-width:720px}
+/* utilización por tipo de tote por depto: encabezado en dos filas fijas y separadores por tipo */
+.gd .tipo-dep th.grp{font-size:10.5px;padding:6px 10px}
+.gd .tipo-dep tr.th-g th{height:28px;box-sizing:border-box}
+.gd .tipo-dep tr.th-2 th{top:28px}
+.gd .tipo-dep .sep{border-left:1px solid var(--line)}
