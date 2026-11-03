@@ -15,6 +15,7 @@ import { TODOS } from '../engine/abcXyz.js';
 import { buscarCol, esAptoOsr } from '../engine/base.js';
 import { normTxt, txt, up, num, cmp, hoyIso, fmtFecha } from '../engine/util.js';
 import { libro } from './tareas.js';
+import { skuKey } from './participacionCd.js';
 
 export const DIAS_VENTAS = 60; // la columna VENTAS de la Base es la venta de los últimos 2 meses
 const CLAVE = 'proyEvento';     // la proyección cargada se guarda en parametros (JSON)
@@ -26,7 +27,9 @@ const AL_PUNI = 'UNIDADES PROYECTADAS|UNIDADES|UNIDADES ESPERADAS|PROYECCION|VEN
 const AL_PPCT = '% OSR|PCT OSR|PORCENTAJE OSR|PARTICIPACION OSR';
 
 export const TIPOS = { APTO: 'APTO OSR', HABILITAR: 'REQUIERE HABILITAR OSR' };
-export const ESTADOS_AB = { COMPLETO: 'ABASTECER COMPLETO', PARCIAL: 'PARCIAL - FALTA STOCK', SIN: 'SIN STOCK FUERA OSR' };
+export const ESTADOS_AB = { COMPLETO: 'ABASTECER COMPLETO', PARCIAL: 'PARCIAL - FALTA STOCK', SS: 'LIMITADO POR STOCK DE SEGURIDAD', MIN: 'BAJO EL MINIMO A TRASLADAR', SIN: 'SIN STOCK FUERA OSR' };
+export const SS_FUERA = 200; // stock de seguridad por SKU que queda fuera de OSR (por defecto)
+export const UMBRAL_RECALL = 0.45; // % del stock en OSR que el evento extrae para contar como espacio que se libera
 const OLAS = ['1 ANTES DEL EVENTO', '2 DURANTE EVENTO'];
 const CLASES9 = ['AX', 'AY', 'AZ', 'BX', 'BY', 'BZ', 'CX', 'CY', 'CZ'];
 
@@ -123,26 +126,188 @@ export async function baseSku() {
 // ---------------------------------------------------------------------------------------------
 // Proyección del evento (Pro_Evt): Departamento | Desc Dpto | Unidades proyectadas | % OSR (opcional)
 // ---------------------------------------------------------------------------------------------
-export async function cargarProyeccion(buffer, archivo, evento) {
-  const wb = XLSX.read(buffer, { type: 'buffer', dense: true });
-  const hoja = wb.SheetNames.find((n) => normTxt(n) === 'PROEVT') || wb.SheetNames[0];
-  const m = XLSX.utils.sheet_to_json(wb.Sheets[hoja], { header: 1, raw: true, defval: '' });
+// lee una hoja de proyección; null si no tiene los encabezados
+function leerHojaProy(ws) {
+  const m = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
   let f = -1, cCod = -1, cNom = -1, cUni = -1, cPct = -1;
   for (let i = 0; i < Math.min(15, m.length); i++) {
     cCod = buscarCol(m[i], AL_PCOD); cNom = buscarCol(m[i], AL_PCAT); cUni = buscarCol(m[i], AL_PUNI);
     if ((cCod >= 0 || cNom >= 0) && cUni >= 0) { f = i; cPct = buscarCol(m[i], AL_PPCT); break; }
   }
-  if (f < 0) throw Object.assign(new Error(`No reconocí los encabezados de la hoja "${hoja}": debe tener Departamento (o Desc Dpto) y Unidades proyectadas.`), { status: 400 });
+  if (f < 0) return null;
   const filas = [];
   for (const r of m.slice(f + 1)) {
     const cod = cCod >= 0 ? txt(r[cCod]) : '', nom = cNom >= 0 ? txt(r[cNom]) : '', uni = num(r[cUni]);
     if (!(uni > 0) || (!cod && !nom)) continue;
     filas.push({ cod, nom, uni, pct: cPct >= 0 && txt(r[cPct]) !== '' ? pctNum(r[cPct]) : null });
   }
-  if (!filas.length) throw Object.assign(new Error('La proyección no tiene departamentos con unidades proyectadas.'), { status: 400 });
-  const valor = { archivo, hoja, evento: txt(evento) || archivo.replace(/\.\w+$/, ''), cargado: hoyIso(), filas };
+  return filas;
+}
+
+// fecha en el nombre de la hoja (ddmmaa o ddmmaaaa, ej. Pro_Black031126) como AAAAMMDD para ordenar; '' si no trae
+function fechaHoja(n) {
+  const g = String(n).match(/(\d{2})(\d{2})(\d{4}|\d{2})(?!\d)/);
+  if (!g) return '';
+  const [, d, mes, a] = g;
+  return (a.length === 2 ? '20' + a : a) + mes + d;
+}
+
+const CLAVE_VER = 'proyEventoVersiones'; // historial de proyecciones cargadas (para comparar versiones)
+const MAX_VER = 30;
+
+async function leerVersiones() {
+  const { rows } = await q('SELECT valor FROM parametros WHERE clave = $1', [CLAVE_VER]);
+  try { return rows[0] ? JSON.parse(rows[0].valor) : []; } catch { return []; }
+}
+async function guardarVersiones(l) {
+  await q('INSERT INTO parametros (clave, valor) VALUES ($1,$2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [CLAVE_VER, JSON.stringify(l.slice(-MAX_VER))]);
+}
+async function activar(v) {
+  const valor = { archivo: v.archivo, hoja: v.hoja, evento: v.evento, cargado: v.cargado, version: v.id, filas: v.filas };
   await q('INSERT INTO parametros (clave, valor) VALUES ($1,$2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [CLAVE, JSON.stringify(valor)]);
-  return { deptos: filas.length, unidades: filas.reduce((s, x) => s + x.uni, 0), evento: valor.evento };
+  return valor;
+}
+const totalProy = (filas) => filas.reduce((s, x) => s + x.uni, 0);
+const firma = (filas) => filas.map((x) => `${x.cod}|${x.nom}|${x.uni}`).join(';');
+
+/** Carga la proyección. Si el libro trae varias hojas de proyección (una por versión, con fecha en el nombre), queda activa
+ *  la hoja "Pro_Evt" o la de fecha más reciente (sin fecha, la última del libro), y todas pasan al historial de versiones.
+ *  Con `anterior`, las hojas solo se guardan como versiones más antiguas que las ya cargadas y la proyección activa no cambia. */
+export async function cargarProyeccion(buffer, archivo, evento, anterior = false) {
+  const wb = XLSX.read(buffer, { type: 'buffer', dense: true });
+  const hojas = wb.SheetNames.map((n, i) => ({ n, i, filas: leerHojaProy(wb.Sheets[n]) })).filter((h) => h.filas?.length);
+  if (!hojas.length) throw Object.assign(new Error(`No reconocí ninguna hoja de proyección en el libro (hojas: ${wb.SheetNames.join(', ')}): debe tener Departamento (o Desc Dpto) y Unidades proyectadas, con al menos un depto con unidades.`), { status: 400 });
+  hojas.sort((x, y) => (fechaHoja(x.n) || '0').localeCompare(fechaHoja(y.n) || '0') || x.i - y.i);
+  const activa = hojas.find((h) => normTxt(h.n) === 'PROEVT') || hojas[hojas.length - 1];
+  const base = archivo.replace(/\.\w+$/, '');
+  const ahora = new Date().toISOString();
+  const vers = await leerVersiones();
+  // la proyección que estaba activa antes del historial de versiones entra como la primera, para poder compararla
+  const previa = await leerProyeccion();
+  if (previa && !previa.version && !vers.length) {
+    vers.push({ id: 'previa', archivo: previa.archivo, hoja: previa.hoja, evento: previa.evento, cargado: previa.cargado, en: '', filas: previa.filas });
+    if (anterior) await activar(vers[0]); // la activa queda identificada como versión para compararla
+  }
+  if (anterior) {
+    const nuevas = [];
+    for (const h of hojas) {
+      const ig = vers.findIndex((x) => x.archivo === archivo && x.hoja === h.n && firma(x.filas) === firma(h.filas));
+      if (ig >= 0) vers.splice(ig, 1);
+      nuevas.push({ id: `${Date.now().toString(36)}-a${h.i}`, archivo, hoja: h.n, evento: txt(evento) || (hojas.length > 1 ? `${base} · ${h.n}` : base),
+        cargado: hoyIso(), en: ahora, filas: h.filas });
+    }
+    vers.unshift(...nuevas);
+    await guardarVersiones(vers);
+    const act = await leerProyeccion();
+    return { anterior: true, deptos: nuevas[nuevas.length - 1].filas.length, unidades: totalProy(nuevas[nuevas.length - 1].filas), evento: nuevas[nuevas.length - 1].evento,
+      hoja: nuevas[nuevas.length - 1].hoja, hojas: hojas.map((h) => ({ hoja: h.n, deptos: h.filas.length, unidades: totalProy(h.filas) })), activa: act?.evento || '', versiones: Math.min(vers.length, MAX_VER) };
+  }
+  // la activa se agrega al final para que quede como la versión más reciente
+  for (const h of [...hojas.filter((x) => x !== activa), activa]) {
+    const ig = vers.findIndex((x) => x.archivo === archivo && x.hoja === h.n && firma(x.filas) === firma(h.filas));
+    if (ig >= 0) vers.splice(ig, 1); // la misma hoja con los mismos datos no se repite
+    h.v = { id: `${Date.now().toString(36)}-${h.i}`, archivo, hoja: h.n, evento: txt(evento) || (hojas.length > 1 ? `${base} · ${h.n}` : base),
+      cargado: hoyIso(), en: ahora, filas: h.filas };
+    vers.push(h.v);
+  }
+  await guardarVersiones(vers);
+  const valor = await activar(activa.v);
+  return { deptos: activa.filas.length, unidades: totalProy(activa.filas), evento: valor.evento, hoja: activa.n,
+    hojas: hojas.map((h) => ({ hoja: h.n, deptos: h.filas.length, unidades: totalProy(h.filas) })), versiones: Math.min(vers.length, MAX_VER) };
+}
+
+/** Versiones cargadas (sin filas) y variación por depto entre dos de ellas (por defecto, la anterior contra la activa). */
+export async function versionesProyeccion(params = {}) {
+  const vers = await leerVersiones();
+  const act = await leerProyeccion();
+  const lista = vers.map((v) => ({ id: v.id, evento: v.evento, archivo: v.archivo, hoja: v.hoja, cargado: v.cargado, en: v.en,
+    deptos: v.filas.length, unidades: totalProy(v.filas), activa: v.id === act?.version })).reverse();
+  const idAct = vers.some((v) => v.id === act?.version) ? act.version : vers[vers.length - 1]?.id;
+  const B = vers.find((v) => v.id === (params.b || idAct));
+  // por defecto se compara contra la última versión cargada (también si se cargó como "versión anterior")
+  const A = vers.find((v) => v.id === params.a && v.id !== B?.id) || (B && vers.filter((v) => v.id !== B.id).sort((x, y) => String(y.en || '').localeCompare(String(x.en || '')))[0]);
+  if (!A || !B) return { versiones: lista, activa: act ? { evento: act.evento, archivo: act.archivo, hoja: act.hoja, version: act.version || null } : null, comp: null };
+  const clave = (x) => digitos(x.cod) || normTxt(x.nom);
+  const m = new Map();
+  for (const [lado, v] of [['a', A], ['b', B]]) for (const x of v.filas) {
+    const k = clave(x);
+    const d = m.get(k) || { cod: x.cod, nom: x.nom, a: 0, b: 0, pctA: null, pctB: null };
+    d[lado] += x.uni;
+    if (x.pct !== null && x.pct !== undefined) d[lado === 'a' ? 'pctA' : 'pctB'] = x.pct;
+    if (!d.nom) d.nom = x.nom;
+    m.set(k, d);
+  }
+  const ta = totalProy(A.filas), tb = totalProy(B.filas);
+  // alcance del depto con los mismos criterios del reabasto: sin SKU en la Base, se trabaja en OSR o se pickea desde los demás CD
+  const p = await leerParametros();
+  const listaOSR = deptosPrioritarios(p.deptosOsr), soloOSR = up(p.soloDeptosOsr) !== 'NO';
+  const pctG = pctNum(p.osrPct), colchon = pctNum(p.osrColchon);
+  let enBase = null;
+  try {
+    const { skus } = await baseSku();
+    enBase = { cod: new Set(skus.map((x) => x.cod).filter(Boolean)), nom: new Set(skus.map((x) => normTxt(String(x.depto).replace(/^\d+\s*/, '')))) };
+  } catch { /* sin Base de stock: no se distingue el alcance por Base */ }
+  const deptos = [...m.values()].map((d) => {
+    const cod = digitos(d.cod);
+    const alcance = enBase && !enBase.cod.has(cod) && !enBase.nom.has(normTxt(d.nom)) ? 'SIN BASE' : !soloOSR || listaOSR.has(cod) ? 'OSR' : 'OTROS CD';
+    const meta = (u, pct) => (alcance === 'OSR' ? u * (pct > 0 ? pct : pctG) * (1 + colchon) : 0);
+    const metaA = meta(d.a, d.pctA), metaB = meta(d.b, d.pctB);
+    return { ...d, alcance, metaA, metaB, difMeta: metaB - metaA, dif: d.b - d.a, var: d.a ? (d.b - d.a) / d.a : null, partA: ta ? d.a / ta : 0, partB: tb ? d.b / tb : 0,
+      estado: !d.a ? 'NUEVO' : !d.b ? 'QUITADO' : d.b > d.a ? 'SUBE' : d.b < d.a ? 'BAJA' : 'IGUAL' };
+  }).sort((x, y) => Math.abs(y.dif) - Math.abs(x.dif) || cmp(x.cod, y.cod));
+  const cuenta = (e) => deptos.filter((d) => d.estado === e).length;
+  const tot = { a: ta, b: tb, dif: tb - ta, var: ta ? (tb - ta) / ta : null, sube: cuenta('SUBE'), baja: cuenta('BAJA'), nuevo: cuenta('NUEVO'), quitado: cuenta('QUITADO'), igual: cuenta('IGUAL') };
+  return { versiones: lista, activa: { evento: act?.evento, version: act?.version || null },
+    comp: { a: lista.find((v) => v.id === A.id), b: lista.find((v) => v.id === B.id), deptos, tot, analisis: analizarVariacion(deptos, tot, { pctG, colchon, conBase: !!enBase }) } };
+}
+
+const ALCANCES = [['OSR', 'Deptos que se trabajan en OSR'], ['OTROS CD', 'Deptos fuera de la lista OSR (otros CD)'], ['SIN BASE', 'Deptos sin SKU en la Base (no entran al cálculo)']];
+
+/** Análisis de la variación entre dos versiones: por alcance, efecto en la meta OSR, concentración y lectura en texto. */
+function analizarVariacion(deptos, tot, { pctG, colchon, conBase }) {
+  const f0 = (v) => Math.round(v).toLocaleString('es-CL');
+  const sg = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + f0(Math.abs(v));
+  const pc = (v, d = 1) => (v === null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${(v * 100).toFixed(d).replace('.', ',')}%`);
+  const porAlcance = ALCANCES.map(([k, nombre]) => {
+    const l = deptos.filter((d) => d.alcance === k);
+    const a = l.reduce((s, d) => s + d.a, 0), b = l.reduce((s, d) => s + d.b, 0);
+    return { alcance: k, nombre, deptos: l.length, a, b, dif: b - a, var: a ? (b - a) / a : null, metaA: l.reduce((s, d) => s + d.metaA, 0), metaB: l.reduce((s, d) => s + d.metaB, 0) };
+  }).filter((x) => x.deptos);
+  const osr = porAlcance.find((x) => x.alcance === 'OSR') || { a: 0, b: 0, dif: 0, metaA: 0, metaB: 0 };
+  const meta = { a: osr.metaA, b: osr.metaB, dif: osr.metaB - osr.metaA, var: osr.metaA ? (osr.metaB - osr.metaA) / osr.metaA : null };
+  const suben = deptos.filter((d) => d.dif > 0).sort((x, y) => y.dif - x.dif), bajan = deptos.filter((d) => d.dif < 0).sort((x, y) => x.dif - y.dif);
+  const bruto = deptos.reduce((s, d) => s + Math.abs(d.dif), 0);
+  const top5 = [...deptos].sort((x, y) => Math.abs(y.dif) - Math.abs(x.dif)).slice(0, 5);
+  const conc = bruto ? top5.reduce((s, d) => s + Math.abs(d.dif), 0) / bruto : 0;
+  // deptos que más cambian de peso en el total del evento
+  const peso = [...deptos].sort((x, y) => Math.abs(y.partB - y.partA) - Math.abs(x.partB - x.partA)).slice(0, 3).filter((d) => Math.abs(d.partB - d.partA) >= 0.005);
+  const nom = (d) => `${d.cod} ${d.nom}`.trim();
+  const lst = (l) => l.map((d) => `${nom(d)} (${sg(d.dif)}${d.var !== null ? `, ${pc(d.var, 0)}` : ', nuevo'})`).join(', ');
+  const lectura = [];
+  lectura.push(tot.dif === 0 ? `El total del evento no cambia (${f0(tot.b)} unid.).`
+    : `El evento ${tot.dif > 0 ? 'sube' : 'baja'} ${f0(Math.abs(tot.dif))} unid. (${pc(tot.var)}): de ${f0(tot.a)} a ${f0(tot.b)}. ${tot.sube} deptos suben, ${tot.baja} bajan${tot.nuevo ? `, ${tot.nuevo} son nuevos` : ''}${tot.quitado ? `, ${tot.quitado} se quitan` : ''} y ${tot.igual} quedan igual.`);
+  if (bruto > Math.abs(tot.dif) * 1.2 && tot.dif !== 0) lectura.push(`Hay redistribución entre deptos: se movieron ${f0(bruto)} unid. en total (suben ${f0(suben.reduce((s, d) => s + d.dif, 0))}, bajan ${f0(-bajan.reduce((s, d) => s + d.dif, 0))}), más que la variación neta.`);
+  for (const x of porAlcance) if (x.dif) lectura.push(`${x.nombre}: ${sg(x.dif)} unid. (${pc(x.var)}), de ${f0(x.a)} a ${f0(x.b)}.`);
+  if (meta.dif) lectura.push(`Efecto en la meta OSR (% OSR ${Math.round(pctG * 100)}%${colchon ? ` + colchón ${Math.round(colchon * 100)}%` : ''}, o el % OSR del depto si viene en el archivo): ${sg(meta.dif)} unid. (${pc(meta.var)}), de ${f0(meta.a)} a ${f0(meta.b)}. ${meta.dif > 0 ? 'Hay que subir más stock al OSR antes del evento.' : 'Baja lo que hay que subir al OSR.'}`);
+  else lectura.push('La meta OSR no cambia: la variación está solo en deptos que no se trabajan en OSR.');
+  if (suben.length) lectura.push(`Los que más suben: ${lst(suben.slice(0, 5))}.`);
+  if (bajan.length) lectura.push(`Los que más bajan: ${lst(bajan.slice(0, 5))}.`);
+  if (bruto && deptos.length > 5) lectura.push(`Los 5 deptos con más cambio explican el ${Math.round(conc * 100)}% del movimiento.`);
+  if (peso.length) lectura.push(`Cambia el peso en el evento: ${peso.map((d) => `${nom(d)} ${(d.partA * 100).toFixed(1).replace('.', ',')}% → ${(d.partB * 100).toFixed(1).replace('.', ',')}%`).join(' · ')}.`);
+  const nuevosOsr = deptos.filter((d) => d.estado === 'NUEVO' && d.alcance === 'OSR');
+  if (nuevosOsr.length) lectura.push(`Deptos OSR nuevos en la proyección (sin meta antes): ${nuevosOsr.map(nom).join(', ')}: revisar que tengan SKU aptos con stock para subir.`);
+  const sinBase = deptos.filter((d) => d.alcance === 'SIN BASE' && d.b > 0);
+  if (sinBase.length) lectura.push(`En la versión nueva hay ${sinBase.length} deptos sin SKU en la Base (${f0(sinBase.reduce((s, d) => s + d.b, 0))} unid. que no entran al cálculo): ${sinBase.map(nom).join(', ')}.`);
+  if (!conBase) lectura.push('Sin Base de stock cargada no se pudo distinguir qué deptos no tienen SKU.');
+  return { porAlcance, meta, bruto, concentracion: conc, lectura };
+}
+
+/** Deja activa otra versión cargada de la proyección. */
+export async function activarVersionProyeccion(id) {
+  const v = (await leerVersiones()).find((x) => x.id === id);
+  if (!v) throw Object.assign(new Error('No encontré esa versión de la proyección.'), { status: 404 });
+  await activar(v);
+  return { evento: v.evento, deptos: v.filas.length, unidades: totalProy(v.filas) };
 }
 
 export async function borrarProyeccion() {
@@ -169,7 +334,9 @@ async function reabasto(params = {}) {
   const listaOSR = deptosPrioritarios(p.deptosOsr);
   const soloOSR = up(p.soloDeptosOsr) !== 'NO';
   const clA = listaClases(p.osrClasesAbc, 'ABC'), clX = listaClases(p.osrClasesXyz, 'XYZ');
-  const conf = { pctG, colchon, olas, minPri, soloOSR, listaOSR: p.deptosOsr, clases: `${[...clA].join(',')} / ${[...clX].join(',')}`, pesos: { X: p.osrPesoX, Y: p.osrPesoY, Z: p.osrPesoZ } };
+  // Logística OSR: por defecto participan los SKU con Y o con stock en OSR; con SOLO_Y, solo los que tienen la marca Y
+  const soloY = up(params.logOsr) === 'SOLO_Y';
+  const conf = { pctG, colchon, olas, minPri, soloY, soloOSR, listaOSR: p.deptosOsr, clases: `${[...clA].join(',')} / ${[...clX].join(',')}`, pesos: { X: p.osrPesoX, Y: p.osrPesoY, Z: p.osrPesoZ } };
   if (!proy) return { carga, osr, hayCol, conf, sinProyeccion: true };
 
   // departamentos de la base (DESC_DEPTO) indexados por nombre y por código
@@ -183,11 +350,11 @@ async function reabasto(params = {}) {
     if (x.cod && !dC.has(x.cod)) dC.set(x.cod, c);
   }
   // proyección: por código de depto o por nombre
-  const noEnc = [];
+  const noEnc = []; let uNoEnc = 0;
   for (const r of proy.filas) {
     let c = digitos(r.cod) ? dC.get(digitos(r.cod)) : null;
     if (!c && r.nom) c = cats[dN.get(normTxt(r.nom))];
-    if (!c) { noEnc.push(`${r.cod} ${r.nom}`.trim()); continue; }
+    if (!c) { noEnc.push(`${r.cod} ${r.nom}`.trim()); uNoEnc += r.uni; continue; }
     c.enProy = true; c.proy = (c.proy || 0) + r.uni;
     if (r.pct !== null && r.pct !== undefined) c.pctCat = r.pct;
   }
@@ -196,7 +363,7 @@ async function reabasto(params = {}) {
 
   // aptitud por SKU
   for (const x of skus) {
-    x.motivo = !x.cat.osr ? 'DEPTO FUERA DE OSR' : x.log === 'Y' ? 'APTO (LOGISTICA_OSR=Y)' : x.osr > 0 ? 'CON STOCK EN OSR' : 'NO APTO OSR';
+    x.motivo = !x.cat.osr ? 'DEPTO FUERA DE OSR' : x.log === 'Y' ? 'APTO (LOGISTICA_OSR=Y)' : x.osr > 0 && !soloY ? 'CON STOCK EN OSR' : 'NO APTO OSR';
     x.eleg = x.motivo !== 'NO APTO OSR' && x.motivo !== 'DEPTO FUERA DE OSR';
     if (x.eleg && !clA.has(x.abc)) { x.eleg = false; x.motivo = `CLASE ${x.abc} EXCLUIDA`; }
     if (x.eleg && !clX.has(x.xyz)) { x.eleg = false; x.motivo = `CLASE ${x.xyz} EXCLUIDA`; }
@@ -207,7 +374,7 @@ async function reabasto(params = {}) {
     const pct = c.pctCat > 0 ? c.pctCat : pctG;
     c.pct = c.osr ? pct : 0;
     c.meta = c.osr ? redArriba(c.proy * pct * (1 + colchon)) : 0;
-    Object.assign(c, { vt: 0, osrStock: 0, ve: 0, cap: 0, nE: 0, nN: 0, asig: 0, antes: 0, durante: 0, asigPot: 0, nNoV: 0, unNo: 0, cls: new Array(9).fill(0) });
+    Object.assign(c, { vt: 0, osrStock: 0, ve: 0, cap: 0, nE: 0, nN: 0, asig: 0, yaOsr: 0, antes: 0, durante: 0, asigPot: 0, nNoV: 0, unNo: 0, nMarcaN: 0, unMarcaN: 0, cls: new Array(9).fill(0) });
     const el = [];
     for (const x of c.skus) {
       c.vt += x.vta; c.osrStock += x.osr;
@@ -232,6 +399,7 @@ async function reabasto(params = {}) {
         x.durante = Math.max(0, meta - Math.max(x.previa, x.osr));
         x.exced = Math.max(0, x.osr - meta);
         c.antes += x.antes; c.durante += x.durante;
+        c.yaOsr += Math.min(x.osr, meta); // parte de la meta del SKU que ya está en OSR
         const ci = CLASES9.indexOf(x.matriz);
         if (ci >= 0) c.cls[ci] += meta;
         x.estado = cp[k] <= 0 ? 'SIN STOCK' : al[k] < x.ideal - 0.5 ? 'STOCK INSUFICIENTE' : x.antes > 0 ? 'SUBIR ANTES DEL EVENTO'
@@ -239,16 +407,18 @@ async function reabasto(params = {}) {
         detalle.push(x);
       });
     }
-    // SKU no aptos del depto y potencial si se habilitan en OSR
+    // SKU no aptos del depto y potencial si se habilitan en OSR: los de marca N no pueden ingresar a OSR, no suman potencial
     const pot = [];
     for (const x of c.skus) {
-      if (x.motivo === 'NO APTO OSR') {
+      const noApto = x.motivo === 'NO APTO OSR';
+      x.habilitable = noApto && x.log !== 'N';
+      if (noApto) {
         x.unAtr = c.vt > 0 ? c.proy * x.vta / c.vt : 0;
         x.potAl = 0;
-        if (x.vta > 0) { c.nNoV++; c.unNo += x.unAtr; }
+        if (x.vta > 0) { if (x.habilitable) { c.nNoV++; c.unNo += x.unAtr; } else { c.nMarcaN++; c.unMarcaN += x.unAtr; } }
         noAptos.push(x);
       }
-      if (x.qty > 0 && (x.eleg || x.motivo === 'NO APTO OSR')) pot.push(x);
+      if (x.qty > 0 && (x.eleg || x.habilitable)) pot.push(x);
     }
     if (pot.length) {
       const w2 = pot.map((x) => x.vta * pesoXyz(x.xyz, p));
@@ -271,7 +441,8 @@ async function reabasto(params = {}) {
   noAptos.forEach((x, i) => {
     x.prioridad = i + 1;
     x.pctVenta = x.cat.vt > 0 ? x.vta / x.cat.vt : 0;
-    if (x.vta <= 0) { x.impacto = 'SIN VENTA'; x.recomendacion = 'Sin venta en el mes: no prioritario'; }
+    if (!x.habilitable) { x.impacto = 'MARCA N'; x.recomendacion = 'Logística OSR = N: no puede ingresar a OSR, se pickea desde otro CD'; }
+    else if (x.vta <= 0) { x.impacto = 'SIN VENTA'; x.recomendacion = 'Sin venta en el mes: no prioritario'; }
     else if (x.qty <= 0) { x.impacto = 'SIN STOCK'; x.recomendacion = 'Con venta pero sin stock: gestionar abastecimiento'; }
     else {
       x.impacto = x.abc === 'A' || x.pctVenta >= 0.05 ? 'ALTO' : x.abc === 'B' ? 'MEDIO' : 'BAJO';
@@ -280,28 +451,39 @@ async function reabasto(params = {}) {
   });
 
   // totales del resumen gerencial
-  const g = { tP: 0, tPO: 0, tPF: 0, nDO: 0, nDF: 0, tM: 0, tA: 0, tPot: 0, tAn: 0, tD: 0, tOsr: 0, tNoV: 0, tUnNo: 0, cls: new Array(9).fill(0), peorNom: '', peorCob: 2 };
+  const g = { tP: 0, tPO: 0, tPF: 0, nDO: 0, nDF: 0, tM: 0, tA: 0, tPot: 0, tAn: 0, tD: 0, tOsr: 0, tNoV: 0, tUnNo: 0, tMarcaN: 0, tUnMarcaN: 0, cls: new Array(9).fill(0), peorNom: '', peorCob: 2 };
   for (const c of proyectados) {
     g.tP += c.proy;
     if (c.osr) {
       g.nDO++; g.tPO += c.proy; g.tOsr += c.osrStock; g.tM += c.meta; g.tA += c.asig; g.tPot += c.asigPot;
-      g.tAn += c.antes; g.tD += c.durante; g.tNoV += c.nNoV; g.tUnNo += c.unNo;
+      g.tAn += c.antes; g.tD += c.durante; g.tNoV += c.nNoV; g.tUnNo += c.unNo; g.tMarcaN += c.nMarcaN; g.tUnMarcaN += c.unMarcaN;
       c.cls.forEach((v, j) => { g.cls[j] += v; });
       if (c.meta > 0 && c.asig / c.meta < g.peorCob) { g.peorCob = c.asig / c.meta; g.peorNom = c.nom; }
     } else { g.nDF++; g.tPF += c.proy; }
   }
   const sumCls = g.cls.reduce((s, v) => s + v, 0);
+  // stock actual en OSR de los deptos OSR: lo que cubre la meta, lo que sobra en SKU con meta y lo que está en SKU sin meta
+  g.osrUsa = 0; g.osrExced = 0; g.osrSinMeta = 0;
+  for (const c of proyectados) if (c.osr) for (const x of c.skus) {
+    if (!(x.osr > 0)) continue;
+    if (x.eleg && x.meta > 0) { g.osrUsa += Math.min(x.osr, x.meta); g.osrExced += Math.max(0, x.osr - x.meta); } else g.osrSinMeta += x.osr;
+  }
+  g.metaSku = detalle.reduce((s, x) => s + (x.meta || 0), 0); // meta asignada a SKU (con el mínimo por SKU)
+  g.tArch = g.tP + uNoEnc; g.tNoEnc = uNoEnc; // el archivo completo y lo de deptos sin SKU en la Base (no entra al cálculo)
   g.pHoy = g.tP > 0 ? g.tA / g.tP : 0; g.pPot = g.tP > 0 ? g.tPot / g.tP : 0; g.pHoyO = g.tPO > 0 ? g.tA / g.tPO : 0;
   g.cob = g.tM > 0 ? g.tA / g.tM : 1;
   g.brecha = g.tM - g.tA >= 0.5 ? g.tM - g.tA : 0;
   const f0 = (v) => Math.round(v).toLocaleString('es-CL'), pc = (v, d = 0) => `${(v * 100).toFixed(d).replace('.', ',')}%`;
   const lectura = [`El evento proyecta ${f0(g.tP)} unid.: ${f0(g.tPO)} (${pc(g.tP ? g.tPO / g.tP : 0)}) en ${g.nDO} deptos que se trabajan en OSR`
-    + (g.nDF > 0 ? ` y ${f0(g.tPF)} (${pc(g.tP ? g.tPF / g.tP : 0)}) en ${g.nDF} deptos fuera de la lista OSR, que se pickean desde los demás CD` : '') + '.'];
+    + (g.nDF > 0 ? ` y ${f0(g.tPF)} (${pc(g.tP ? g.tPF / g.tP : 0)}) en ${g.nDF} deptos fuera de la lista OSR, que se pickean desde los demás CD` : '') + '.'
+    + (g.tNoEnc > 0 ? ` El archivo trae ${f0(g.tArch)} unid.: ${f0(g.tNoEnc)} son de ${noEnc.length} deptos sin SKU en la Base de stock y no entran al cálculo.` : '')];
   if (g.nDO > 0) {
     lectura.push(`Meta OSR: ${pc(pctG)} de lo proyectado en deptos OSR = ${f0(g.tM)} unid. Con el stock y la habilitación actual se cubren ${f0(g.tA)} unid. (${pc(g.cob, 1)} de la meta; ${pc(g.pHoyO, 1)} de lo proyectado en deptos OSR; ${pc(g.pHoy, 1)} del total del evento).`);
     lectura.push(g.brecha > 0 ? `Faltan ${f0(g.brecha)} unid. para cumplir la meta OSR.` : 'La meta OSR se cubre completa con el stock actual de SKU aptos.');
+    lectura.push(`La meta OSR es demanda del evento (lo que el OSR debe despachar), no capacidad: el stock en OSR de estos deptos (${f0(g.tOsr)} unid.) se reparte en ${f0(g.osrUsa)} que cubren meta, ${f0(g.osrExced)} de excedente en SKU que ya tienen su meta completa y ${f0(g.osrSinMeta)} en SKU sin meta (sin venta, clase excluida${conf.soloY ? ' o sin marca Y' : ''}). La meta de cada depto se reparte según la venta de sus SKU, por eso el stock de SKU sin venta no la cubre.`);
     lectura.push(`Hoy hay ${f0(g.tOsr)} unid. en OSR de estos deptos. Plan de carga: subir ${f0(g.tAn)} unid. antes del evento${olas > 1 ? ` y reponer ${f0(g.tD)} unid. durante el evento (${olas} cargas)` : ''}.`);
-    if (g.tNoV > 0) lectura.push(`${g.tNoV} SKU con venta en deptos OSR NO están aptos para OSR y representan ${f0(g.tUnNo)} unid. del proyectado. Habilitarlos subiría la cobertura de la meta a ${pc(g.tM ? g.tPot / g.tM : 0, 1)}.`);
+    if (g.tNoV > 0) lectura.push(`${g.tNoV} SKU con venta en deptos OSR no tienen la Y pero se pueden habilitar (no son N) y representan ${f0(g.tUnNo)} unid. del proyectado. Habilitarlos subiría la cobertura de la meta a ${pc(g.tM ? g.tPot / g.tM : 0, 1)}.`);
+    if (g.tMarcaN > 0) lectura.push(`${g.tMarcaN} SKU con venta en deptos OSR tienen marca N (no pueden ingresar a OSR) y representan ${f0(g.tUnMarcaN)} unid. del proyectado: se pickean desde otro CD y no cuentan en el potencial.`);
     if (g.tPot < g.tM - 0.5) lectura.push(`Aun habilitando los no aptos faltan ${f0(g.tM - g.tPot)} unid.: se requiere stock adicional (compra / tránsito) o redistribución entre CD.`);
     if (sumCls > 0) lectura.push(`El ${pc((g.cls[0] + g.cls[3]) / sumCls)} de la meta OSR está en SKU de alta rotación (AX / BX); el ${pc((g.cls[2] + g.cls[5] + g.cls[8]) / sumCls)} en clase Z.`);
     if (g.peorNom && g.peorCob < 0.999) lectura.push(`Departamento OSR más crítico: ${g.peorNom} (cubre el ${pc(g.peorCob)} de su meta).`);
@@ -313,7 +495,10 @@ async function reabasto(params = {}) {
 // ---------------------------------------------------------------------------------------------
 // Paso 6: AB_GenerarAbastecimiento (lee RP_Detalle y, opcional, RP_NoAptos)
 // ---------------------------------------------------------------------------------------------
-function abastecer(detalle, noAptos, incluirNoAptos) {
+// El traslado deja fuera de OSR al menos `ss` unidades de cada SKU (stock de seguridad en los demás CD): se toma como
+// máximo el stock fuera menos ese mínimo; lo que no se toma por esa reserva se informa aparte del faltante sin stock.
+// Con `minTras`, un SKU cuyo traslado posible es menor a ese mínimo no se mueve (no genera líneas ni asignado).
+function abastecer(detalle, noAptos, incluirNoAptos, ss = 0, minTras = 0) {
   const req = [];
   for (const x of detalle) if (x.antes + x.durante > 0) req.push({ x, tipo: TIPOS.APTO, meta: x.meta, antes: x.antes, durante: x.durante });
   if (incluirNoAptos) for (const x of noAptos) {
@@ -324,52 +509,96 @@ function abastecer(detalle, noAptos, incluirNoAptos) {
   req.forEach((r, i) => {
     r.prioridad = i + 1;
     const ubs = r.x.origen.map((o) => ({ ...o, saldo: o.qty })).sort((a, b) => b.qty - a.qty);
-    const usadas = new Set();
+    const usadas = new Set(), lineas = [];
     r.asignado = 0;
+    let disp = Math.max(0, r.x.fuera - ss); // lo que se puede sacar dejando el stock de seguridad
+    r.retenido = Math.min(r.antes + r.durante, Math.min(r.x.fuera, ss)); // tope de lo que la reserva puede dejar sin trasladar
     [r.antes, r.durante].forEach((need, ola) => {
       for (const u of ubs) {
-        if (need <= 1e-6) break;
+        if (need <= 1e-6 || disp <= 1e-6) break;
         if (u.saldo <= 0) continue;
-        const tome = Math.min(u.saldo, need);
-        picking.push({ ola: OLAS[ola], cd: u.cd, ubic: u.ubic, sku: r.x.sku, desc: r.x.desc, depto: r.x.depto, matriz: r.x.matriz, tipo: r.tipo,
+        const tome = Math.min(u.saldo, need, disp);
+        disp -= tome;
+        lineas.push({ ola: OLAS[ola], cd: u.cd, ubic: u.ubic, sku: r.x.sku, desc: r.x.desc, depto: r.x.depto, matriz: r.x.matriz, tipo: r.tipo,
           unidades: tome, stockAntes: u.saldo, saldo: u.saldo - tome, prioridad: r.prioridad });
         u.saldo -= tome; need -= tome; r.asignado += tome; usadas.add(u);
       }
     });
     r.total = r.antes + r.durante;
-    r.faltante = r.total - r.asignado < 0.5 ? 0 : r.total - r.asignado;
+    // traslado menor al mínimo: no se mueve; esas unidades quedan como descartadas por el mínimo
+    r.descartado = 0;
+    if (minTras > 0 && r.asignado > 0 && r.asignado < minTras) {
+      r.descartado = r.asignado; r.asignado = 0; lineas.length = 0; usadas.clear();
+    }
+    picking.push(...lineas);
+    const pend = r.total - r.asignado - r.descartado < 0.5 ? 0 : r.total - r.asignado - r.descartado;
+    // lo pendiente que se habría podido tomar sin la reserva queda como retenido; el resto es faltante real de stock
+    r.retenido = Math.min(pend, Math.max(0, Math.min(r.x.fuera, ss)));
+    r.faltante = Math.max(0, pend - r.retenido);
     r.nUb = usadas.size;
-    r.estado = r.x.fuera <= 0 ? ESTADOS_AB.SIN : r.faltante > 0 ? ESTADOS_AB.PARCIAL : ESTADOS_AB.COMPLETO;
+    r.estado = r.x.fuera <= 0 ? ESTADOS_AB.SIN : r.descartado > 0 ? ESTADOS_AB.MIN : r.faltante > 0 ? ESTADOS_AB.PARCIAL : r.retenido > 0 ? ESTADOS_AB.SS : ESTADOS_AB.COMPLETO;
   });
   picking.sort((a, b) => cmp(a.ola, b.ola) || cmp(a.cd, b.cd) || cmp(a.ubic, b.ubic));
   picking.forEach((l, i) => { l.nro = i + 1; });
   const s = (k) => req.reduce((t, r) => t + r[k], 0);
   const tot = { skus: req.length, aptos: req.filter((r) => r.tipo === TIPOS.APTO).length, total: s('total'), antes: s('antes'), durante: s('durante'),
-    asignado: s('asignado'), faltante: s('faltante'), lineas: picking.length, ubicaciones: new Set(picking.map((l) => l.cd + '|' + l.ubic)).size };
+    asignado: s('asignado'), faltante: s('faltante'), retenido: s('retenido'), descartado: s('descartado'), minTras, skusEfectivos: req.filter((r) => r.asignado > 0).length,
+    skusDescartados: req.filter((r) => r.descartado > 0).length, ss, lineas: picking.length, ubicaciones: new Set(picking.map((l) => l.cd + '|' + l.ubic)).size };
   const porEstado = Object.values(ESTADOS_AB).map((e) => ({ estado: e, skus: req.filter((r) => r.estado === e).length, uni: req.filter((r) => r.estado === e).reduce((t, r) => t + r.total, 0) }));
   const porCd = Object.entries(picking.reduce((a, l) => { (a[l.cd] ??= [0, 0])[l.ola === OLAS[0] ? 0 : 1] += l.unidades; return a; }, {}))
     .map(([cd, [antes, durante]]) => ({ cd, antes, durante, total: antes + durante })).sort((a, b) => b.total - a.total);
   return { req, picking, tot, porEstado, porCd };
 }
 
+/** Espacio que el evento libera en OSR (recall): SKU con meta cuya extracción proyectada es al menos el umbral del stock que
+ *  tendrán en OSR después del traslado. Con la distribución de totes cargada, se estiman los totes que se desocupan. */
+async function recallOsr(detalle, req, umbral) {
+  const tras = new Map(req.map((r) => [r.x.sku, r.asignado]));
+  let porTote = new Map();
+  try {
+    const { rows } = await q('SELECT sku, stock::float8 AS stock, full_t + half_t / 2.0 + quarter_t / 4.0 AS totes FROM osr_totes');
+    porTote = new Map(rows.filter((x) => x.totes > 0 && x.stock > 0).map((x) => [skuKey(x.sku), x.stock / x.totes]));
+  } catch { /* sin distribución de totes */ }
+  const l = [];
+  for (const x of detalle) {
+    if (!(x.meta > 0)) continue;
+    const post = x.osr + (tras.get(x.sku) || 0);
+    if (!(post > 0)) continue;
+    const ext = Math.min(1, x.meta / post);
+    if (ext < umbral) continue;
+    const pt = porTote.get(skuKey(x.sku)) || null;
+    l.push({ sku: x.sku, desc: x.desc, depto: x.cat.nom, matriz: x.matriz, osr: x.osr, traslado: tras.get(x.sku) || 0, post, meta: x.meta, ext,
+      queda: Math.max(0, post - x.meta), porTote: pt, totes: pt ? Math.min(post, x.meta) / pt : null });
+  }
+  l.sort((a, b) => b.ext - a.ext || b.meta - a.meta || cmp(a.sku, b.sku));
+  const sum = (k) => l.reduce((t, x) => t + (x[k] || 0), 0);
+  return { umbral, skus: l.length, post: sum('post'), libera: l.reduce((t, x) => t + Math.min(x.post, x.meta), 0), queda: sum('queda'),
+    totes: l.some((x) => x.totes !== null) ? sum('totes') : null, conTotes: l.filter((x) => x.totes !== null).length, filas: l };
+}
+
+const minDe = (params) => Math.max(0, Number(params.minTras) || 0);
+const ssDe = (params) => (params.ssFuera !== undefined && params.ssFuera !== '' ? Math.max(0, Number(params.ssFuera) || 0) : SS_FUERA);
+const umbralDe = (params) => (params.umbralRecall !== undefined && params.umbralRecall !== '' ? pctNum(params.umbralRecall) : UMBRAL_RECALL);
+
 // ---------------------------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------------------------
 const filaDep = (c) => ({ nom: c.nom, cod: c.cod, osr: c.osr, proy: c.proy, pct: c.pct, meta: c.meta, uAp: c.uAp, uNo: c.uNo, pctNo: c.proy ? c.uNo / c.proy : 0,
-  osrStock: c.osrStock, cap: c.cap, asig: c.asig, cob: c.meta > 0 ? c.asig / c.meta : null, pot: c.meta > 0 ? c.asigPot / c.meta : null, brecha: c.brecha,
+  osrStock: c.osrStock, cap: c.cap, asig: c.asig, yaOsr: c.yaOsr, cob: c.meta > 0 ? c.asig / c.meta : null, pot: c.meta > 0 ? c.asigPot / c.meta : null, brecha: c.brecha,
   antes: c.antes, durante: c.durante, estado: c.estado, nE: c.nE, nNoV: c.nNoV, unNo: c.unNo, cls: c.cls });
 const filaSku = (x) => ({ prioridad: x.prioridad, depto: x.cat.nom, sku: x.sku, desc: x.desc, abc: x.abc, xyz: x.xyz, matriz: x.matriz, vta: x.vta, st: x.st,
   peso: x.peso, partic: x.partic, motivo: x.motivo, osr: x.osr, fuera: x.fuera, ideal: x.ideal, meta: x.meta, previa: x.previa, antes: x.antes, durante: x.durante, exced: x.exced, estado: x.estado });
 const filaNo = (x) => ({ prioridad: x.prioridad, depto: x.cat.nom, sku: x.sku, desc: x.desc, matriz: x.matriz, vta: x.vta, pctVenta: x.pctVenta, unAtr: x.unAtr, qty: x.qty,
   osr: x.osr, log: x.log || '(vacío)', potAl: x.potAl, impacto: x.impacto, recomendacion: x.recomendacion });
 const filaReq = (r) => ({ prioridad: r.prioridad, depto: r.x.depto, sku: r.x.sku, desc: r.x.desc, matriz: r.x.matriz, tipo: r.tipo, meta: r.meta, osr: r.x.osr,
-  antes: r.antes, durante: r.durante, total: r.total, fuera: r.x.fuera, asignado: r.asignado, faltante: r.faltante, nUb: r.nUb, estado: r.estado });
+  antes: r.antes, durante: r.durante, total: r.total, fuera: r.x.fuera, asignado: r.asignado, retenido: r.retenido, descartado: r.descartado, faltante: r.faltante, nUb: r.nUb, estado: r.estado });
 
 export async function simularAbastecimiento(params = {}) {
   const r = await reabasto(params);
   if (r.sinProyeccion) return r;
   const incluir = params.incluirNoAptos === true || params.incluirNoAptos === '1';
-  const ab = abastecer(r.detalle, r.noAptos, incluir);
+  const ab = abastecer(r.detalle, r.noAptos, incluir, ssDe(params), minDe(params));
+  const rc = await recallOsr(r.detalle, ab.req, umbralDe(params));
   const dep = txt(params.depto), est = txt(params.estado);
   const enDep = (x) => !dep || x.cat.nom === dep;
   const det = r.detalle.filter((x) => enDep(x) && (!est || x.estado === est));
@@ -380,12 +609,13 @@ export async function simularAbastecimiento(params = {}) {
   const cuenta = (l, k) => Object.entries(l.reduce((a, x) => ({ ...a, [x[k]]: (a[x[k]] || 0) + 1 }), {})).map(([e, n]) => ({ e, n }));
   return {
     carga: r.carga, osr: r.osr, hayCol: r.hayCol, conf: { ...r.conf, olas: r.conf.olas }, incluirNoAptos: incluir,
-    proy: { evento: r.proy.evento, archivo: r.proy.archivo, cargado: r.proy.cargado, filas: r.proy.filas.length }, noEnc: r.noEnc,
+    proy: { evento: r.proy.evento, archivo: r.proy.archivo, hoja: r.proy.hoja || "", version: r.proy.version || "", cargado: r.proy.cargado, filas: r.proy.filas.length }, noEnc: r.noEnc,
     g: r.g, lectura: r.lectura, deptos: r.deptos.map(filaDep),
     estadosDet: cuenta(r.detalle, 'estado'), estadosNo: cuenta(r.noAptos, 'impacto'),
     detalle: { total: det.length, filas: det.slice(0, 500).map(filaSku) },
     noAptos: { total: no.length, filas: no.slice(0, 500).map(filaNo) },
     ab: { tot: ab.tot, porEstado: ab.porEstado, porCd: ab.porCd, total: req.length, filas: req.slice(0, 500).map(filaReq), lineas: pick.length, picking: pick.slice(0, 500) },
+    recall: (() => { const f = rc.filas.filter((x) => !dep || x.depto === dep); return { ...rc, total: f.length, filas: f.slice(0, 500) }; })(),
   };
 }
 
@@ -393,7 +623,8 @@ export async function archivoAbastecimiento(params = {}) {
   const r = await reabasto(params);
   if (r.sinProyeccion) throw Object.assign(new Error('Carga primero la proyección del evento (Pro_Evt).'), { status: 400 });
   const incluir = params.incluirNoAptos === true || params.incluirNoAptos === '1';
-  const ab = abastecer(r.detalle, r.noAptos, incluir);
+  const ab = abastecer(r.detalle, r.noAptos, incluir, ssDe(params), minDe(params));
+  const rc = await recallOsr(r.detalle, ab.req, umbralDe(params));
   const { g, conf } = r, gen = `Generado ${fmtFecha(hoyIso())}`, pc = (v) => `${Math.round(v * 1000) / 10}%`;
   const R1 = (v) => Math.round(v * 10) / 10;
 
@@ -401,8 +632,8 @@ export async function archivoAbastecimiento(params = {}) {
     ['RESUMEN GERENCIAL · REABASTO OSR PARA EL EVENTO'],
     [`Objetivo: que el OSR pickee el ${pc(conf.pctG)} del volumen proyectado en los deptos que se trabajan en OSR${conf.colchon > 0 ? ` (+ colchón ${pc(conf.colchon)})` : ''}  |  Proyección: ${r.proy.archivo} (${r.proy.evento})  |  ${gen}`],
     [],
-    ['Unidades proyectadas (total evento)', 'Proyectado en deptos OSR', 'Meta OSR', 'Stock actual en OSR (deptos proyectados)', '% de la meta OSR cubierta con stock actual'],
-    [g.tP, g.tPO, g.tM, g.tOsr, g.cob],
+    ['Unidades en el archivo', 'Sin SKU en la Base (no entran)', 'Unidades proyectadas (total evento)', 'Proyectado en deptos OSR', 'Meta OSR', 'Stock actual en OSR (deptos proyectados)', '% de la meta OSR cubierta con stock actual'],
+    [g.tArch, g.tNoEnc, g.tP, g.tPO, g.tM, g.tOsr, g.cob],
     ['Brecha vs meta OSR (unid.)', 'Subir al OSR antes del evento', 'Reponer en OSR durante el evento', 'SKU no aptos OSR con venta (deptos OSR)', '% del proyectado pickeable desde OSR (hoy / habilitando no aptos)'],
     [Math.round(g.brecha), g.tAn, g.tD, g.tNoV, `${pc(g.pHoy)} / ${pc(g.pPot)}`],
     [],
@@ -460,12 +691,12 @@ export async function archivoAbastecimiento(params = {}) {
   const abr = [
     ['SUGERENCIA DE ABASTECIMIENTO OSR · POR SKU'],
     [`Base: RP_Detalle${incluir ? ' + RP_NoAptos' : ''}  |  Todas las cifras en unidades  |  Origen: ubicaciones fuera del OSR (CD <> ${r.osr})  |  ${gen}`],
-    [`SKU: ${t.skus}  ·  Completos: ${pe[0].skus}  ·  Parciales: ${pe[1].skus}  ·  Sin stock fuera OSR: ${pe[2].skus}  ·  Requeridas: ${t.total}  ·  Asignadas: ${t.asignado}${t.total ? ` (${pc(t.asignado / t.total)})` : ''}  ·  Faltante: ${t.faltante}  ·  Líneas de traslado: ${t.lineas}`],
+    [`SKU: ${t.skus}  ·  Completos: ${pe[0].skus}  ·  Parciales: ${pe[1].skus}  ·  Limitados por stock de seguridad: ${pe[2].skus}  ·  Bajo el mínimo a trasladar (${t.minTras} u.): ${pe[3].skus}, ${t.descartado} u.  ·  Sin stock fuera OSR: ${pe[4].skus}  ·  Requeridas: ${t.total}  ·  Asignadas: ${t.asignado}${t.total ? ` (${pc(t.asignado / t.total)})` : ''}  ·  Retenidas por stock de seguridad (${t.ss} u. por SKU fuera de OSR): ${t.retenido}  ·  Faltante: ${t.faltante}  ·  Líneas de traslado: ${t.lineas}`],
     [],
     ['Prioridad', 'Departamento', 'SKU', 'Descripción', 'ABC-XYZ', 'Tipo', 'Meta OSR (unid.)', 'Stock en OSR (unid.)', 'Subir antes del evento (unid.)', 'Reponer durante evento (unid.)',
-      'Total a abastecer (unid.)', 'Stock fuera OSR (unid.)', 'Asignado desde ubicaciones (unid.)', 'Faltante (unid.)', 'Ubicaciones origen', 'Estado'],
-    ...ab.req.map((q2) => [q2.prioridad, q2.x.depto, q2.x.sku, q2.x.desc, q2.x.matriz, q2.tipo, q2.meta, q2.x.osr, q2.antes, q2.durante, q2.total, q2.x.fuera, q2.asignado, q2.faltante, q2.nUb, q2.estado]),
-    ['TOTAL', '', '', '', '', '', ab.req.reduce((s, q2) => s + q2.meta, 0), ab.req.reduce((s, q2) => s + q2.x.osr, 0), t.antes, t.durante, t.total, ab.req.reduce((s, q2) => s + q2.x.fuera, 0), t.asignado, t.faltante, ab.req.reduce((s, q2) => s + q2.nUb, 0), ''],
+      'Total a abastecer (unid.)', 'Stock fuera OSR (unid.)', 'Asignado desde ubicaciones (unid.)', 'Bajo el mínimo a trasladar (unid.)', 'Retenido por stock de seguridad (unid.)', 'Faltante (unid.)', 'Ubicaciones origen', 'Estado'],
+    ...ab.req.map((q2) => [q2.prioridad, q2.x.depto, q2.x.sku, q2.x.desc, q2.x.matriz, q2.tipo, q2.meta, q2.x.osr, q2.antes, q2.durante, q2.total, q2.x.fuera, q2.asignado, q2.descartado, q2.retenido, q2.faltante, q2.nUb, q2.estado]),
+    ['TOTAL', '', '', '', '', '', ab.req.reduce((s, q2) => s + q2.meta, 0), ab.req.reduce((s, q2) => s + q2.x.osr, 0), t.antes, t.durante, t.total, ab.req.reduce((s, q2) => s + q2.x.fuera, 0), t.asignado, t.descartado, t.retenido, t.faltante, ab.req.reduce((s, q2) => s + q2.nUb, 0), ''],
     [],
     ["Cómo leer: 'Total a abastecer' = unidades que deben llegar al OSR para cumplir la meta del SKU (antes del evento + reposición durante el evento). 'Faltante' = unidades que no existen hoy fuera del OSR: requieren compra, tránsito o redistribución. La lista de traslado ubicación por ubicación está en AB_Picking."],
   ];
@@ -481,6 +712,16 @@ export async function archivoAbastecimiento(params = {}) {
     ...(ab.picking.length ? [['TOTAL', '', '', '', '', '', '', '', '', t.asignado]] : []),
   ];
 
+  const rec = [
+    [`ESPACIO QUE SE LIBERA EN OSR DURANTE EL EVENTO · SKU que extraen al menos el ${pc(rc.umbral)} de su stock en OSR`],
+    [`SKU: ${rc.skus}  ·  Stock en OSR tras el traslado: ${Math.round(rc.post)}  ·  Unidades que se extraen: ${Math.round(rc.libera)}${rc.totes !== null ? `  ·  Totes que se desocupan (estimado, ${rc.conTotes} SKU con distribución): ${Math.round(rc.totes)}` : ''}  |  ${gen}`],
+    [],
+    ['SKU', 'Descripción', 'Departamento', 'ABC-XYZ', 'Stock en OSR hoy', 'Traslado al OSR', 'Stock en OSR tras el traslado', 'Meta OSR (extracción proyectada)', '% de extracción', 'Queda en OSR al final', 'Unid. por tote', 'Totes que se desocupan'],
+    ...rc.filas.map((x) => [x.sku, x.desc, x.depto, x.matriz, x.osr, x.traslado, x.post, x.meta, Math.round(x.ext * 1000) / 10, x.queda, x.porTote ? R1(x.porTote) : '', x.totes !== null ? R1(x.totes) : '']),
+    [],
+    ['Cómo leer: estos SKU vacían buena parte de su espacio durante el evento; ese espacio puede reservarse para reponer o ingresar más stock sin arriesgar la capacidad del OSR.'],
+  ];
+
   const evento = normTxt(r.proy.evento).slice(0, 30) || 'Evento';
   return {
     buffer: libro([
@@ -488,7 +729,8 @@ export async function archivoAbastecimiento(params = {}) {
       ['RP_Resumen', res, [32, 14, 8, 12, 14, 14, 12, 14, 14, 14, 12, 12, 14, 14, 24]],
       ['RP_Detalle', det, [9, 26, 14, 40, 6, 6, 8, 10, 10, 10, 10, 24, 10, 10, 10, 11, 10, 12, 12, 11, 24]],
       ['RP_NoAptos', no, [9, 26, 14, 40, 6, 6, 8, 10, 10, 12, 10, 10, 14, 14, 10, 46]],
-      ['AB_Resumen', abr, [9, 26, 14, 40, 9, 22, 11, 11, 13, 13, 13, 13, 14, 11, 11, 24]],
+      ['AB_Resumen', abr, [9, 26, 14, 40, 9, 22, 11, 11, 13, 13, 13, 13, 14, 13, 13, 11, 11, 24]],
+      ['AB_Espacio', rec, [14, 40, 26, 9, 12, 12, 14, 14, 11, 12, 10, 12]],
       ['AB_Picking', pick, [7, 20, 10, 16, 14, 40, 24, 9, 22, 11, 13, 13, 10, 11]],
     ]),
     nombre: `Reabasto_OSR_${evento}_${hoyIso()}.xlsx`,

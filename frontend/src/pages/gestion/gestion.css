@@ -236,3 +236,14 @@
 .gd .tipo-dep tr.th-g th{height:28px;box-sizing:border-box}
 .gd .tipo-dep tr.th-2 th{top:28px}
 .gd .tipo-dep .sep{border-left:1px solid var(--line)}
+/* indicadores del reabasto en una sola fila (se reacomodan en pantallas angostas) */
+.gd .grid-kpi.kpi-fila{grid-template-columns:repeat(6,minmax(0,1fr))}
+.gd .grid-kpi.kpi-fila .v{font-size:clamp(22px,2.2vw,34px)}
+@media (max-width:1100px){.gd .grid-kpi.kpi-fila{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.gd .grid-kpi.kpi-fila{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* tabla compacta (plan por SKU del reabasto): sin desplazamiento horizontal */
+.gd .tbl-compacta table{width:100%}
+.gd .tbl-compacta th{white-space:normal;padding:8px 6px;vertical-align:bottom}
+.gd .tbl-compacta td{padding:7px 6px}
+.gd .tbl-compacta td.wrap{min-width:220px}
+.gd .tbl-compacta .pill{white-space:normal;line-height:1.25;text-align:center}

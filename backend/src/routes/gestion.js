@@ -13,7 +13,7 @@ import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow, carga
 import { abcXyz, guardarAbcXyz, cargarHistoria, borrarHistoria } from '../gestion/services/abcXyz.js';
 import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds,
   consolidacionInterna, archivoConsolidacionInterna } from '../gestion/services/optimizacion.js';
-import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbastecimiento } from '../gestion/services/abastecimientoOsr.js';
+import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbastecimiento, versionesProyeccion, activarVersionProyeccion } from '../gestion/services/abastecimientoOsr.js';
 import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
@@ -152,9 +152,11 @@ app.post('/optimizacion/interna/simular', r((req) => consolidacionInterna(req.bo
 app.get('/optimizacion/interna/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionInterna(req.query))));
 app.post('/optimizacion/abastecimiento/proyeccion', subir.single('archivo'), r(async (req) => {
   if (!req.file) throw Object.assign(new Error('Adjunta el archivo con la proyección del evento (Pro_Evt).'), { status: 400 });
-  return cargarProyeccion(req.file.buffer, nombreArchivo(req.file), req.body?.evento);
+  return cargarProyeccion(req.file.buffer, nombreArchivo(req.file), req.body?.evento, req.body?.anterior === '1');
 }));
 app.post('/optimizacion/abastecimiento/proyeccion/borrar', r(() => borrarProyeccion()));
+app.post('/optimizacion/abastecimiento/proyeccion/versiones', r((req) => versionesProyeccion(req.body || {})));
+app.post('/optimizacion/abastecimiento/proyeccion/activar', r((req) => activarVersionProyeccion(req.body?.id)));
 app.post('/optimizacion/abastecimiento/simular', r((req) => simularAbastecimiento(req.body || {})));
 app.get('/optimizacion/abastecimiento/excel', r(async (req, res) => enviarXlsx(res, await archivoAbastecimiento({ ...req.query, incluirNoAptos: req.query.incluirNoAptos === '1' }))));
 app.post('/participacion/venta', subir.single('archivo'), r(async (req) => {

@@ -36,7 +36,7 @@ const ARCHIVOS = {
       r => `${N(r.cargadas)} ubicaciones reservadas.`],
     ['proevt', 'Proyección del evento (Pro_Evt)', 'Departamento, Desc Dpto y Unidades proyectadas (opcional % OSR por depto). Es la base del reabasto OSR del evento.',
       '/gestion/optimizacion/abastecimiento/proyeccion', ['gd.osr'], 'proevt', ['/gestion/osr', 'Abastecimiento OSR'],
-      r => `${r.evento}: ${N(r.deptos)} deptos, ${N(r.unidades)} unidades proyectadas.`, 'evento'],
+      r => r.anterior ? `${r.evento}: ${N(r.deptos)} deptos, ${N(r.unidades)} unidades (hoja ${r.hoja}), guardada como versión anterior. La proyección activa sigue siendo ${r.activa}: compáralas al final de Reabasto por proyección.` : `${r.evento}: ${N(r.deptos)} deptos, ${N(r.unidades)} unidades proyectadas (hoja ${r.hoja}).${r.hojas?.length > 1 ? ` El libro trae ${r.hojas.length} hojas de proyección: queda activa la de fecha más reciente y todas quedan como versiones para comparar en Abastecimiento OSR.` : ''}`, 'evento'],
     ['osrtotes', 'Distribución de totes OSR', 'Una fila por SKU con Article number, Article name, Stock, Stock locations y los compartimentos que ocupa en FULL, HALF y QUARTER. Cada carga reemplaza la anterior.',
       '/gestion/optimizacion/osr/totes/distribucion', ['gd.osr'], 'osrtotes', ['/gestion/osr', 'Abastecimiento OSR'],
       r => `${N(r.skus)} SKU, ${N(r.stock)} u., ${N(r.ubicaciones)} compartimentos (${N(r.full)} full, ${N(r.half)} half, ${N(r.quarter)} quarter) = ${N(Math.ceil(r.totes))} totes${r.noCuadra ? ` · ${N(r.noCuadra)} SKU con Stock locations distinto de FULL + HALF + QUARTER` : ''}.`],
@@ -59,10 +59,12 @@ function CargaArchivo({ id, titulo, ayuda, url, modeloTipo, ir, mensaje, campo }
   const [subiendo, setSubiendo] = useState(false);
   const [res, setRes] = useState(null);
   const [valor, setValor] = useState('');
+  const [anterior, setAnterior] = useState(false);
   const subir = async f => {
     setSubiendo(true); setRes(null);
     const fd = new FormData(); fd.append('archivo', f);
     if (campo && valor) fd.append(campo, valor);
+    if (campo === 'evento' && anterior) fd.append('anterior', '1');
     try { const r = await api.post(url, fd); setRes({ ok: true, t: `${f.name}: ${mensaje(r)}` }); } catch (e) { setRes({ ok: false, t: e.message }); }
     setSubiendo(false);
   };
@@ -71,6 +73,9 @@ function CargaArchivo({ id, titulo, ayuda, url, modeloTipo, ir, mensaje, campo }
       <h3>{titulo}</h3><p className="hint">{ayuda}</p>
       {campo === 'evento' && <label className="field" style={{ width: 'auto', marginBottom: 8 }}><span>Nombre del evento (opcional)</span>
         <input type="text" value={valor} placeholder="Se toma del nombre del archivo" onChange={e => setValor(e.target.value)} /></label>}
+      {campo === 'evento' && <label className="hint" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+        <input type="checkbox" checked={anterior} onChange={e => setAnterior(e.target.checked)} />
+        Es una versión anterior: solo se guarda para comparar y no reemplaza la proyección activa</label>}
       <SubirArchivo onFile={subir} disabled={subiendo} texto={subiendo ? 'Procesando…' : 'Elegir archivo'} />
       <p className="hint" style={{ marginTop: 8 }}><LinkModelo tipo={modeloTipo} /> · <Link to={ir[0]}>Ir a {ir[1]}</Link></p>
       {res && <p className={`msg ${res.ok ? '' : 'err'}`} role="status">{res.t}</p>}

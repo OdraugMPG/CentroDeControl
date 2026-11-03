@@ -122,9 +122,9 @@ const pct = (v, d = 0) => (v === null || v === undefined || v === '' ? '—' : f
 const ESCENARIOS = ['Conservador', 'Base', 'Optimista'];
 const TONO_RIESGO = { QUIEBRE: 'm-4', AJUSTADO: 'm-2', OK: 'm-0', 'SIN VENTA': '', 'SIN STOCK': 'm-4' };
 const TONO_RP = { 'SUBIR ANTES DEL EVENTO': 'm-2', 'REPONER DURANTE EVENTO': 'm-1', 'STOCK INSUFICIENTE': 'm-4', 'SIN STOCK': 'm-4', OK: 'm-0', 'OK (excedente en OSR)': 'm-0',
-  'NO ALCANZA META': 'm-4', 'SIN SKU APTOS OSR': 'm-4', 'DEPTO NO OSR': '', ALTO: 'm-4', MEDIO: 'm-2', BAJO: '', 'SIN VENTA': '' };
-const TONO_AB = { 'ABASTECER COMPLETO': 'm-0', 'PARCIAL - FALTA STOCK': 'm-2', 'SIN STOCK FUERA OSR': 'm-4' };
-const LECTURA_AB = { 'ABASTECER COMPLETO': 'Completo', 'PARCIAL - FALTA STOCK': 'Parcial · falta stock', 'SIN STOCK FUERA OSR': 'Sin stock fuera de OSR' };
+  'NO ALCANZA META': 'm-4', 'SIN SKU APTOS OSR': 'm-4', 'DEPTO NO OSR': '', ALTO: 'm-4', MEDIO: 'm-2', BAJO: '', 'SIN VENTA': '', 'MARCA N': '' };
+const TONO_AB = { 'ABASTECER COMPLETO': 'm-0', 'PARCIAL - FALTA STOCK': 'm-2', 'LIMITADO POR STOCK DE SEGURIDAD': 'm-1', 'BAJO EL MINIMO A TRASLADAR': 'm-1', 'SIN STOCK FUERA OSR': 'm-4' };
+const LECTURA_AB = { 'ABASTECER COMPLETO': 'Completo', 'PARCIAL - FALTA STOCK': 'Parcial · falta stock', 'LIMITADO POR STOCK DE SEGURIDAD': 'Limitado por stock de seguridad', 'BAJO EL MINIMO A TRASLADAR': 'Bajo el mínimo a trasladar', 'SIN STOCK FUERA OSR': 'Sin stock fuera de OSR' };
 
 /** Simulación diferida (espera 250 ms a que el usuario termine de escribir). */
 function useSimulacion(url, cuerpo, deps) {
@@ -345,22 +345,126 @@ function ConfigEventos({ onGuardar }) {
 // =============================================================================================
 // Pasos 5 y 6: reabasto por proyección y abastecimiento
 // =============================================================================================
-const VISTAS_RP = [['det', 'Plan por SKU (RP_Detalle)'], ['no', 'SKU no aptos (RP_NoAptos)'], ['ab', 'Abastecimiento (AB_Resumen)'], ['pick', 'Lista de traslado (AB_Picking)']];
+const VISTAS_RP = [['det', 'Plan por SKU (RP_Detalle)'], ['no', 'SKU no aptos (RP_NoAptos)'], ['ab', 'Abastecimiento (AB_Resumen)'], ['pick', 'Lista de traslado (AB_Picking)'], ['esp', 'Espacio que se libera (AB_Espacio)']];
+
+const ALCANCE_VER = { OSR: 'OSR', 'OTROS CD': 'Otros CD', 'SIN BASE': 'Sin SKU en Base' };
+const ESTADO_VER = { SUBE: ['Sube', 'ok'], BAJA: ['Baja', 'mid'], NUEVO: ['Nuevo', 'ok'], QUITADO: ['Quitado', 'bad'], IGUAL: ['Igual', ''] };
+
+// variación por depto entre dos versiones cargadas de la proyección del evento; permite dejar activa otra versión
+function VariacionProyeccion({ rec, onActivar }) {
+  const [sel, setSel] = useState({ a: '', b: '' });
+  const [filtro, setFiltro] = useState('');
+  const [r] = useSimulacion('/api/optimizacion/abastecimiento/proyeccion/versiones', sel, [JSON.stringify(sel), rec]);
+  if (!r) return null;
+  if (r.versiones.length < 2 || !r.comp) {
+    return <p className="note">Variación entre versiones: aún hay {r.versiones.length} versión cargada. Al cargar una nueva proyección (o un libro con varias hojas Pro_Evt con fecha) se compara aquí contra la anterior.</p>;
+  }
+  const { a, b, tot, deptos, analisis: an } = r.comp;
+  const hora = (v) => (v.en ? new Date(v.en).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '');
+  const nom = (v) => `${v.evento}${v.activa ? ' (activa)' : ''} · ${fmt(v.unidades)} u. · ${fFecha(v.cargado)} ${hora(v)}`;
+  const activar = async (id) => { try { await api.post('/api/optimizacion/abastecimiento/proyeccion/activar', { id }); toast('Versión activada: el reabasto usa esta proyección.'); onActivar(); } catch (e) { toast(e.message, true); } };
+  const pct = (x) => (x === null ? '—' : `${x > 0 ? '+' : ''}${fmt(x * 100, 1)}%`);
+  const l = deptos.filter((d) => !filtro || d.estado === filtro);
+  return (
+    <div className="sec" style={{ marginTop: 18 }}>
+      <div className="row spread" style={{ alignItems: 'flex-end', marginBottom: 8 }}>
+        <h3 style={{ margin: 0 }}>Variación de la proyección por departamento</h3>
+        <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+          <div><label className="lbl" htmlFor="vp-a">Versión anterior</label>
+            <select id="vp-a" value={a.id} onChange={(e) => setSel({ ...sel, a: e.target.value, b: b.id })}>{r.versiones.filter((v) => v.id !== b.id).map((v) => <option key={v.id} value={v.id}>{nom(v)}</option>)}</select></div>
+          <div><label className="lbl" htmlFor="vp-b">Versión nueva</label>
+            <select id="vp-b" value={b.id} onChange={(e) => setSel({ a: e.target.value === a.id ? '' : a.id, b: e.target.value })}>{r.versiones.map((v) => <option key={v.id} value={v.id}>{nom(v)}</option>)}</select></div>
+          {!b.activa && <button className="btn sm" onClick={() => activar(b.id)}>Usar la versión nueva en el reabasto</button>}
+        </div>
+      </div>
+      <div className="grid-kpi">
+        <div className="kpi"><div className="k">Unidades anterior</div><div className="v">{fmt(tot.a)}</div><div className="n">{a.deptos} deptos · {a.hoja || a.archivo}</div></div>
+        <div className="kpi"><div className="k">Unidades nueva</div><div className="v">{fmt(tot.b)}</div><div className="n">{b.deptos} deptos · {b.hoja || b.archivo}</div></div>
+        <div className={'kpi ' + (tot.dif >= 0 ? 'good' : 'warn')}><div className="k">Variación</div><div className="v">{tot.dif > 0 ? '+' : ''}{fmt(tot.dif)}</div><div className="n">{pct(tot.var)} sobre la anterior</div></div>
+        <div className="kpi"><div className="k">Deptos</div><div className="v">{fmt(tot.sube)} ↑ · {fmt(tot.baja)} ↓</div><div className="n">{fmt(tot.nuevo)} nuevos · {fmt(tot.quitado)} quitados · {fmt(tot.igual)} sin cambio</div></div>
+      </div>
+      <div className="chips" style={{ margin: '4px 0 8px' }}>
+        <button className="chip" aria-pressed={!filtro} onClick={() => setFiltro('')}>Todos · {deptos.length}</button>
+        {Object.entries(ESTADO_VER).map(([k, [t]]) => tot[k.toLowerCase()] > 0 && <button key={k} className="chip" aria-pressed={filtro === k} onClick={() => setFiltro(filtro === k ? '' : k)}>{t} · {tot[k.toLowerCase()]}</button>)}
+      </div>
+      <div className="tbl" style={{ maxHeight: 460 }}>
+        <table>
+          <thead><tr><th>Depto</th><th>Descripción</th><th className="num">Anterior</th><th className="num">Nueva</th><th className="num">Variación u.</th><th className="num">Variación %</th>
+            <th className="num">Part. anterior</th><th className="num">Part. nueva</th><th>Alcance</th><th className="num">Var. meta OSR</th><th>Estado</th></tr></thead>
+          <tbody>
+            {l.map((d) => (
+              <tr key={d.cod + d.nom}>
+                <td className="mono">{d.cod}</td><td>{d.nom}</td><td className="num">{fmt(d.a)}</td><td className="num">{fmt(d.b)}</td>
+                <td className="num"><b>{d.dif > 0 ? '+' : ''}{fmt(d.dif)}</b></td><td className="num">{pct(d.var)}</td>
+                <td className="num">{fmt(d.partA * 100, 1)}%</td><td className="num">{fmt(d.partB * 100, 1)}%</td>
+                <td className="note">{ALCANCE_VER[d.alcance]}</td><td className="num">{d.alcance === 'OSR' && Math.round(d.difMeta) ? `${d.difMeta > 0 ? '+' : ''}${fmt(d.difMeta, 0)}` : <span className="muted">—</span>}</td>
+                <td><span className={'pill ' + ESTADO_VER[d.estado][1]}>{ESTADO_VER[d.estado][0]}</span></td>
+              </tr>
+            ))}
+            <tr><td colSpan={2}><b>Total</b></td><td className="num"><b>{fmt(tot.a)}</b></td><td className="num"><b>{fmt(tot.b)}</b></td><td className="num"><b>{tot.dif > 0 ? '+' : ''}{fmt(tot.dif)}</b></td><td className="num"><b>{pct(tot.var)}</b></td><td colSpan={3} /><td className="num"><b>{an.meta.dif > 0 ? '+' : ''}{fmt(an.meta.dif, 0)}</b></td><td /></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style={{ margin: '18px 0 6px' }}>Análisis de la variación</h3>
+      <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)', alignItems: 'start' }}>
+        <ul className="lectura" style={{ margin: 0, paddingLeft: 18 }}>{an.lectura.map((t, i) => <li key={i} style={{ marginBottom: 4 }}>{t}</li>)}</ul>
+        <div>
+          <div className="tbl">
+            <table>
+              <thead><tr><th>Alcance</th><th className="num">Deptos</th><th className="num">Anterior</th><th className="num">Nueva</th><th className="num">Variación</th><th className="num">%</th></tr></thead>
+              <tbody>
+                {an.porAlcance.map((x) => (
+                  <tr key={x.alcance}><td>{ALCANCE_VER[x.alcance]}</td><td className="num">{x.deptos}</td><td className="num">{fmt(x.a)}</td><td className="num">{fmt(x.b)}</td>
+                    <td className="num"><b>{x.dif > 0 ? '+' : ''}{fmt(x.dif)}</b></td><td className="num">{pct(x.var)}</td></tr>
+                ))}
+                <tr><td><b>Total evento</b></td><td className="num">{deptos.length}</td><td className="num"><b>{fmt(tot.a)}</b></td><td className="num"><b>{fmt(tot.b)}</b></td><td className="num"><b>{tot.dif > 0 ? '+' : ''}{fmt(tot.dif)}</b></td><td className="num"><b>{pct(tot.var)}</b></td></tr>
+                <tr><td>Meta OSR</td><td /><td className="num">{fmt(an.meta.a, 0)}</td><td className="num">{fmt(an.meta.b, 0)}</td><td className="num"><b>{an.meta.dif > 0 ? '+' : ''}{fmt(an.meta.dif, 0)}</b></td><td className="num">{pct(an.meta.var)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="note">Movimiento bruto entre deptos: {fmt(an.bruto)} unid. · los 5 deptos con más cambio explican el {fmt(an.concentracion * 100, 0)}%.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// orden por columna de una tabla: clic ordena (texto A-Z, números de mayor a menor), segundo clic invierte
+function useOrden(inicial = { k: '', dir: 1 }) {
+  const [ord, setOrd] = useState(inicial);
+  const th = (k, txt, cls = 'num') => (
+    <th key={k} className={cls} aria-sort={ord.k === k ? (ord.dir > 0 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="th-ord" title="Ordenar" onClick={() => setOrd(ord.k === k ? { k, dir: -ord.dir } : { k, dir: cls === 'num' ? -1 : 1 })}>
+        {txt}<span className="flecha" aria-hidden="true">{ord.k === k ? (ord.dir > 0 ? '▲' : '▼') : '↕'}</span></button></th>
+  );
+  const ordenar = (l) => (!ord.k ? l : [...l].sort((a, b) => {
+    const va = a[ord.k], vb = b[ord.k];
+    if (va === null || va === undefined) return vb === null || vb === undefined ? 0 : 1; // vacíos al final
+    if (vb === null || vb === undefined) return -1;
+    return ord.dir * (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va ?? '').localeCompare(String(vb ?? ''), 'es', { numeric: true }));
+  }));
+  return [th, ordenar];
+}
 
 function ReabastoProyeccion() {
-  const [f, setF] = useState({ pctOsr: '', colchon: '', olas: '', minimo: '', incluirNoAptos: false, estado: '', depto: '' });
+  const [f, setF] = useState({ pctOsr: '', colchon: '', olas: '', minimo: '', logOsr: '', ssFuera: '', minTras: '', umbralRecall: '', incluirNoAptos: false, estado: '', depto: '' });
   const [rec, setRec] = useState(0);
   const [vista, setVista] = useState('det');
-  const cuerpo = { ...f, pctOsr: f.pctOsr === '' ? '' : Number(f.pctOsr) / 100, colchon: f.colchon === '' ? '' : Number(f.colchon) / 100 };
+  const [thD, ordenarD] = useOrden();
+  const cuerpo = { ...f, umbralRecall: f.umbralRecall === '' ? '' : Number(f.umbralRecall) / 100, pctOsr: f.pctOsr === '' ? '' : Number(f.pctOsr) / 100, colchon: f.colchon === '' ? '' : Number(f.colchon) / 100 };
   const [r, cargando] = useSimulacion('/api/optimizacion/abastecimiento/simular', cuerpo, [JSON.stringify(f), rec]);
   const set = (k) => (v) => setF({ ...f, [k]: v });
   const alt = (k, v) => set(k)(f[k] === v ? '' : v);
   const quitar = async () => { try { await api.post('/api/optimizacion/abastecimiento/proyeccion/borrar'); setRec(rec + 1); } catch (e) { toast(e.message, true); } };
   const osr = r?.osr || 'OSR';
   const g = r?.g, c = r?.conf;
-  const excel = urlApi('/api/optimizacion/abastecimiento/excel' + qs({ pctOsr: cuerpo.pctOsr, colchon: cuerpo.colchon, olas: f.olas, minimo: f.minimo, incluirNoAptos: f.incluirNoAptos ? '1' : '' }));
-  const estados = !r?.proy ? [] : vista === 'det' ? r.estadosDet.map((x) => [x.e, x.n]) : vista === 'no' ? r.estadosNo.map((x) => [x.e, x.n]) : r.ab.porEstado.filter((x) => x.skus).map((x) => [x.estado, x.skus]);
+  const excel = urlApi('/api/optimizacion/abastecimiento/excel' + qs({ pctOsr: cuerpo.pctOsr, colchon: cuerpo.colchon, olas: f.olas, minimo: f.minimo, logOsr: f.logOsr, ssFuera: f.ssFuera, minTras: f.minTras, umbralRecall: f.umbralRecall === '' ? '' : Number(f.umbralRecall) / 100, incluirNoAptos: f.incluirNoAptos ? '1' : '' }));
+  const estados = !r?.proy ? [] : vista === 'det' ? r.estadosDet.map((x) => [x.e, x.n]) : vista === 'no' ? r.estadosNo.map((x) => [x.e, x.n]) : vista === 'esp' ? [] : r.ab.porEstado.filter((x) => x.skus).map((x) => [x.estado, x.skus]);
   const cambiarVista = (v) => { setVista(v); if (f.estado) setF({ ...f, estado: '' }); };
+  // participación del depto en la proyección total y en el stock actual del OSR (de los deptos proyectados)
+  const totOsrDep = (r?.deptos || []).reduce((t, x) => t + x.osrStock, 0);
+  const depPart = (r?.deptos || []).map((x) => ({ ...x, partProy: r.g.tP ? x.proy / r.g.tP : 0, partOsr: totOsrDep ? x.osrStock / totOsrDep : 0 }));
   const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
   return (
     <div className="sec">
@@ -374,7 +478,7 @@ function ReabastoProyeccion() {
         <fieldset className="cons-ruta">
           <legend className="lbl">Proyección del evento (Pro_Evt)</legend>
           <div className="row" style={{ alignItems: 'center' }}>
-            {r?.proy ? <span><b>{r.proy.evento}</b> <span className="note">· {r.proy.archivo} · {r.proy.filas} filas · cargada {fFecha(r.proy.cargado)}</span></span> : <span className="note">Sin proyección cargada</span>}
+            {r?.proy ? <span><b>{r.proy.evento}</b> <span className="note">· {r.proy.archivo}{r.proy.hoja ? ` · hoja ${r.proy.hoja}` : ''} · {r.proy.filas} filas · cargada {fFecha(r.proy.cargado)}</span></span> : <span className="note">Sin proyección cargada</span>}
             <IrACarga id="proevt" etiqueta={r?.proy ? 'Reemplazar Pro_Evt (en Datos)' : 'Cargar Pro_Evt (en Datos)'} />
             {r?.proy && <button className="btn sm" onClick={quitar}>Quitar</button>}
           </div>
@@ -385,6 +489,9 @@ function ReabastoProyeccion() {
             <div><label className="lbl" htmlFor="rp-col">Colchón %</label><input id="rp-col" type="number" className="w90" min="0" placeholder={fmt(c.colchon * 100, 0)} value={f.colchon} onChange={(e) => set('colchon')(e.target.value)} /></div>
             <div><label className="lbl" htmlFor="rp-olas">Olas de carga</label><input id="rp-olas" type="number" className="w90" min="1" max="10" placeholder={c.olas} value={f.olas} onChange={(e) => set('olas')(e.target.value)} /></div>
             <div><label className="lbl" htmlFor="rp-min">Mínimo por SKU</label><input id="rp-min" type="number" className="w90" min="0" placeholder={c.minPri} value={f.minimo} onChange={(e) => set('minimo')(e.target.value)} /></div>
+            <div><label className="lbl" htmlFor="rp-log">Logística OSR</label>
+              <select id="rp-log" value={f.logOsr} onChange={(e) => setF({ ...f, logOsr: e.target.value, estado: '' })}>
+                <option value="">Y o con stock en {osr}</option><option value="SOLO_Y">Solo con marca Y</option></select></div>
           </>
         )}
         {cargando && <span className="note">Calculando…</span>}
@@ -394,38 +501,48 @@ function ReabastoProyeccion() {
       {r?.proy && g && (
         <>
           {!r.hayCol && <div className="alert warn">La Base no trae la columna "Logística OSR": todos los SKU cuentan como aptos.</div>}
-          {r.noEnc.length > 0 && <div className="alert warn">Deptos de la proyección sin SKU en la Base: {r.noEnc.join(' · ')}</div>}
-          <div className="grid-kpi">
-            {tile('Unidades proyectadas', fmt(g.tP), '', `${fmt(g.tPO)} (${pct(g.tP ? g.tPO / g.tP : 0)}) en ${g.nDO} deptos ${osr}`)}
-            {tile(`Meta ${osr}`, fmt(g.tM), '', `${pct(c.pctG)} de lo proyectado en deptos ${osr}${c.colchon ? ` + colchón ${pct(c.colchon)}` : ''}`)}
-            {tile('Meta cubierta con stock actual', pct(g.cob, 1), g.cob >= 0.9995 ? 'good' : g.cob >= 0.85 ? 'warn' : 'bad', g.brecha > 0 ? `brecha ${fmt(g.brecha)} u.` : 'sin brecha')}
-            {tile(`Subir al ${osr} antes del evento`, fmt(g.tAn), 'warn', c.olas > 1 ? `reponer durante: ${fmt(g.tD)} u. (${c.olas} cargas)` : `stock actual en ${osr}: ${fmt(g.tOsr)} u.`)}
-            {tile(`Pickeable desde ${osr}`, `${pct(g.pHoy, 1)} → ${pct(g.pPot, 1)}`, '', `del total del evento, hoy → habilitando no aptos · ${fmt(g.tNoV)} SKU no aptos con venta`)}
+          {r.noEnc.length > 0 && <div className="alert warn">Deptos de la proyección sin SKU en la Base ({fmt(g.tNoEnc)} u. que no entran al cálculo: el archivo trae {fmt(g.tArch)} u. y se trabajan {fmt(g.tP)}): {r.noEnc.join(" · ")}</div>}
+          <div className="grid-kpi kpi-fila">
+            {tile('Unidades proyectadas', fmt(g.tP), '', `todo el evento · ${g.nDO + g.nDF} deptos${g.tNoEnc ? ` · ${fmt(g.tNoEnc)} u. del archivo sin SKU en la Base` : ''}`)}
+            {tile(`Deptos ${osr}`, fmt(g.tPO), '', `${pct(g.tP ? g.tPO / g.tP : 0)} del evento · ${g.nDO} deptos`)}
+            {tile('Deptos otros CD', fmt(g.tPF), '', `${pct(g.tP ? g.tPF / g.tP : 0)} del evento · ${g.nDF} deptos fuera de ${osr}`)}
+            {tile(`Meta ${osr}`, fmt(g.tM), '', `${pct(c.pctG)}${c.colchon ? ` + colchón ${pct(c.colchon)}` : ''} de deptos ${osr}: lo que debe despachar`)}
+            {tile('Meta cubierta', pct(g.cob, 1), g.cob >= 0.9995 ? 'good' : g.cob >= 0.85 ? 'warn' : 'bad', g.brecha > 0 ? `brecha ${fmt(g.brecha)} u.: SKU con venta sin stock suficiente` : 'sin brecha')}
+            {tile(`Subir al ${osr} antes`, fmt(g.tAn), 'warn', `meta en SKU ${fmt(g.metaSku)} = ${fmt(g.osrUsa)} ya en ${osr} + ${fmt(g.tAn)} a subir${c.olas > 1 ? ` + ${fmt(g.tD)} durante` : ''}`)}
           </div>
           <ul className="lista-lectura">{r.lectura.map((l, i) => <li key={i}>{l}</li>)}</ul>
 
           <div className="tbl" style={{ maxHeight: 380, marginTop: 12 }}>
             <table>
-              <thead><tr><th>Depto</th><th className="num">Proyectadas</th><th className="num">% {osr}</th><th className="num">Meta</th><th className="num">% en no aptos</th><th className="num">Stock en {osr}</th>
-                <th className="num">Cubierta</th><th className="num">Cobertura</th><th className="num">Habilitando no aptos</th><th className="num">Brecha</th><th className="num">Subir antes</th><th className="num">Reponer durante</th><th>Estado</th></tr></thead>
+              <thead><tr>{thD('nom', 'Depto', '')}{thD('proy', 'Unidades proyectadas')}{thD('partProy', '% participación')}{thD('osrStock', `Stock en ${osr}`)}{thD('partOsr', `% del stock ${osr}`)}
+                {thD('meta', 'Meta')}
+                {thD('antes', 'Subir antes')}{thD('asig', 'Cubierta con stock total')}{thD('cob', 'Cobertura')}{thD('brecha', 'Brecha')}{...(c.olas > 1 ? [thD('durante', 'Reponer durante')] : [])}{thD('estado', 'Estado', '')}</tr></thead>
               <tbody>
-                {r.deptos.map((x) => (
+                {ordenarD(depPart).map((x) => (
                   <tr key={x.nom} className={f.depto === x.nom ? 'sel' : ''} style={{ cursor: 'pointer' }} onClick={() => alt('depto', x.nom)} title="Filtrar por este depto">
-                    <td>{x.nom}</td><td className="num">{fmt(x.proy)}</td><td className="num">{pct(x.pct)}</td><td className="num">{fmt(x.meta)}</td><td className="num">{pct(x.pctNo)}</td>
-                    <td className="num">{fmt(x.osrStock)}</td><td className="num">{fmt(x.asig)}</td><td className="num">{pct(x.cob, 1)}</td><td className="num">{pct(x.pot, 1)}</td>
-                    <td className="num">{x.brecha ? <b style={{ color: 'var(--bad)' }}>{fmt(x.brecha)}</b> : '—'}</td><td className="num">{fmt(x.antes)}</td><td className="num">{fmt(x.durante)}</td>
+                    <td>{x.nom}</td><td className="num">{fmt(x.proy)}</td><td className="num"><b>{pct(x.partProy, 1)}</b></td><td className="num">{fmt(x.osrStock)}</td><td className="num"><b>{pct(x.partOsr, 1)}</b></td>
+                    <td className="num">{fmt(x.meta)}</td>                    <td className="num">{fmt(x.antes)}</td><td className="num">{fmt(x.asig)}</td><td className="num">{pct(x.cob, 1)}</td>
+                    <td className="num">{x.brecha ? <b style={{ color: 'var(--bad)' }}>{fmt(x.brecha)}</b> : '—'}</td>{c.olas > 1 && <td className="num">{fmt(x.durante)}</td>}
                     <td><span className={'pill ' + TONO_RP[x.estado]}>{x.estado}</span></td></tr>
                 ))}
-                <tr className="tot"><td>Total</td><td className="num">{fmt(g.tP)}</td><td /><td className="num">{fmt(g.tM)}</td><td /><td className="num">{fmt(r.deptos.reduce((s, x) => s + x.osrStock, 0))}</td>
-                  <td className="num">{fmt(g.tA)}</td><td className="num">{pct(g.cob, 1)}</td><td className="num">{pct(g.tM ? g.tPot / g.tM : 0, 1)}</td><td className="num">{fmt(g.brecha)}</td><td className="num">{fmt(g.tAn)}</td><td className="num">{fmt(g.tD)}</td><td /></tr>
+                <tr className="tot"><td>Total</td><td className="num">{fmt(g.tP)}</td><td className="num">100%</td><td className="num">{fmt(totOsrDep)}</td><td className="num">100%</td><td className="num">{fmt(g.tM)}</td>
+                  <td className="num">{fmt(g.tAn)}</td><td className="num">{fmt(g.tA)}</td><td className="num">{pct(g.cob, 1)}</td><td className="num">{fmt(g.brecha)}</td>{c.olas > 1 && <td className="num">{fmt(g.tD)}</td>}<td /></tr>
               </tbody>
             </table>
           </div>
-          <p className="note">Cobertura baja con mucho proyectado en SKU no aptos = la palanca es habilitar esos SKU en Logística OSR, no comprar más. Clic en un depto para filtrar.</p>
+          <p className="note">% participación = peso del depto en el total proyectado del evento. % del stock {osr} = peso del depto en el stock actual del {osr} de los deptos proyectados. Cubierta con stock total = meta que se cubre con el stock de esos SKU en todos los CD (lo que ya está en {osr} + lo que se puede trasladar); Brecha = lo que no alcanza ni con todo el stock. Subir antes = lo que hay que trasladar para cubrir su meta. Clic en un depto para filtrar.</p>
 
           <div className="row spread" style={{ margin: '14px 0 8px' }}>
             <div className="chips">{VISTAS_RP.map(([k, t]) => <button key={k} className="chip" aria-pressed={vista === k} onClick={() => cambiarVista(k)}>{t}</button>)}</div>
-            {(vista === 'ab' || vista === 'pick') && <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.incluirNoAptos} onChange={(e) => setF({ ...f, incluirNoAptos: e.target.checked, estado: '' })} /> Incluir no aptos (requieren habilitar {osr})</label>}
+            {(vista === 'ab' || vista === 'pick' || vista === 'esp') && <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+              <div><label className="lbl" htmlFor="rp-ss">Stock de seguridad fuera de {osr} (u. por SKU)</label>
+                <input id="rp-ss" type="number" className="w90" min="0" placeholder={fmt(r.ab.tot.ss)} value={f.ssFuera} onChange={(e) => setF({ ...f, ssFuera: e.target.value, estado: '' })} /></div>
+              {vista !== 'esp' && <div><label className="lbl" htmlFor="rp-mt">Mínimo a trasladar por SKU (u.)</label>
+                <input id="rp-mt" type="number" className="w90" min="0" placeholder="sin mínimo" value={f.minTras} onChange={(e) => setF({ ...f, minTras: e.target.value, estado: '' })} /></div>}
+              {vista === 'esp' && <div><label className="lbl" htmlFor="rp-um">Extracción mínima %</label>
+                <input id="rp-um" type="number" className="w90" min="1" max="100" placeholder={fmt(r.recall.umbral * 100, 0)} value={f.umbralRecall} onChange={(e) => set('umbralRecall')(e.target.value)} /></div>}
+              {vista !== 'esp' && <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.incluirNoAptos} onChange={(e) => setF({ ...f, incluirNoAptos: e.target.checked, estado: '' })} /> Incluir no aptos (requieren habilitar {osr})</label>}
+            </div>}
           </div>
           <div className="row spread" style={{ marginBottom: 8 }}>
             <div className="chips">{estados.map(([e, n]) => <button key={e} className="chip" aria-pressed={f.estado === e} onClick={() => alt('estado', e)}>{LECTURA_AB[e] || e} · {fmt(n)}</button>)}</div>
@@ -434,21 +551,33 @@ function ReabastoProyeccion() {
 
           {(vista === 'ab' || vista === 'pick') && (
             <div className="grid-kpi">
-              {tile(`A trasladar a ${osr}`, `${fmt(r.ab.tot.total)} u.`, 'good', `${fmt(r.ab.tot.skus)} SKU · antes ${fmt(r.ab.tot.antes)} · durante ${fmt(r.ab.tot.durante)}`)}
+              {tile(`Requerido para el ${osr}`, `${fmt(r.ab.tot.total)} u.`, '', `${fmt(r.ab.tot.skus)} SKU · antes ${fmt(r.ab.tot.antes)} · durante ${fmt(r.ab.tot.durante)}`)}
+              {tile('Sugerido efectivo a trasladar', `${fmt(r.ab.tot.asignado)} u.`, 'good', `${fmt(r.ab.tot.skusEfectivos)} SKU que se mueven${r.ab.tot.total ? ` · ${fmt((r.ab.tot.asignado / r.ab.tot.total) * 100, 0)}% de lo requerido` : ''}${r.ab.tot.minTras ? ` · ${fmt(r.ab.tot.skusDescartados)} SKU (${fmt(r.ab.tot.descartado)} u.) bajo el mínimo de ${fmt(r.ab.tot.minTras)} u.` : ''}`)}
               {tile('Lista de traslado', `${fmt(r.ab.tot.lineas)} líneas`, '', `${fmt(r.ab.tot.ubicaciones)} ubicaciones de origen`)}
+              {tile('Retenido por stock de seguridad', `${fmt(r.ab.tot.retenido)} u.`, r.ab.tot.retenido ? 'warn' : '', `se dejan al menos ${fmt(r.ab.tot.ss)} u. de cada SKU fuera de ${osr}`)}
               {tile(`Faltante sin stock fuera de ${osr}`, `${fmt(r.ab.tot.faltante)} u.`, r.ab.tot.faltante ? 'warn' : '', 'requiere compra, tránsito o redistribución')}
               {tile('Por CD de origen', r.ab.porCd.map((x) => x.cd).join(' · ') || '—', '', r.ab.porCd.map((x) => `${x.cd} ${fmt(x.total)}`).join(' · '))}
             </div>
           )}
 
-          {vista === 'det' && (
-            <Tabla total={r.detalle.total} n={r.detalle.filas.length}
-              enc={['Prior.', 'Clase', 'SKU', 'Descripción', 'Ventas', 'Sell-through', 'Particip.', 'Motivo apto', `En ${osr}`, `Fuera ${osr}`, 'Meta ideal', `Meta ${osr}`, 'Carga previa', 'Subir antes', 'Reponer durante', 'Excedente', 'Estado']}
-              num={[0, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]}
-              filas={r.detalle.filas.map((x) => [x.prioridad, <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>, <span className="mono">{x.sku}</span>, <>{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></>,
-                fmt(x.vta), pct(x.st), pct(x.partic, 1), <span className="note">{x.motivo}</span>, fmt(x.osr), fmt(x.fuera), fmt(x.ideal, 1), <b>{fmt(x.meta)}</b>, fmt(x.previa),
-                x.antes ? <b>{fmt(x.antes)}</b> : '—', x.durante ? fmt(x.durante) : '—', x.exced ? fmt(x.exced) : '—', <span className={'pill ' + TONO_RP[x.estado]}>{x.estado}</span>])} />
-          )}
+          {vista === 'det' && (() => {
+            // tabla compacta: SKU con su descripción, venta con sell-through y participación, meta con la ideal;
+            // carga previa y reponer durante solo con más de una ola (con una, carga previa = meta y no hay reposición)
+            const olas = c.olas > 1;
+            const sub = (t) => <div className="note" style={{ margin: 0 }}>{t}</div>;
+            return (
+              <Tabla compacta total={r.detalle.total} n={r.detalle.filas.length}
+                enc={['Prior.', 'Clase', 'SKU / descripción', 'Ventas', 'Apto', `En ${osr}`, `Fuera ${osr}`, `Meta ${osr}`, ...(olas ? ['Carga previa'] : []), 'Subir antes', ...(olas ? ['Reponer durante'] : []), 'Excedente', 'Estado']}
+                num={olas ? [0, 3, 5, 6, 7, 8, 9, 10, 11] : [0, 3, 5, 6, 7, 8, 9]}
+                filas={r.detalle.filas.map((x) => [x.prioridad, <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>,
+                  <><span className="mono">{x.sku}</span> {x.desc}{sub(x.depto)}</>,
+                  <>{fmt(x.vta)}{sub(`ST ${pct(x.st)} · ${pct(x.partic, 1)}`)}</>,
+                  <span className="note" title={x.motivo}>{MOTIVO_CORTO[x.motivo] || x.motivo}</span>, fmt(x.osr), fmt(x.fuera),
+                  <><b>{fmt(x.meta)}</b>{sub(`ideal ${fmt(x.ideal, 0)}`)}</>, ...(olas ? [fmt(x.previa)] : []),
+                  x.antes ? <b>{fmt(x.antes)}</b> : '—', ...(olas ? [x.durante ? fmt(x.durante) : '—'] : []), x.exced ? fmt(x.exced) : '—',
+                  <span className={'pill ' + TONO_RP[x.estado]}>{x.estado}</span>])} />
+            );
+          })()}
           {vista === 'no' && (
             <Tabla total={r.noAptos.total} n={r.noAptos.filas.length}
               enc={['Prior.', 'Clase', 'SKU', 'Descripción', 'Ventas', '% venta depto', 'Unid. atribuibles', 'Stock', `En ${osr}`, 'Logística OSR', 'Aporte potencial', 'Impacto', 'Recomendación']}
@@ -458,12 +587,33 @@ function ReabastoProyeccion() {
           )}
           {vista === 'ab' && (
             <Tabla total={r.ab.total} n={r.ab.filas.length}
-              enc={['Prior.', 'Clase', 'SKU', 'Descripción', 'Tipo', `Meta ${osr}`, `En ${osr}`, 'Subir antes', 'Reponer durante', 'Total', `Fuera ${osr}`, 'Asignado', 'Faltante', 'Ubic.', 'Estado']}
-              num={[0, 5, 6, 7, 8, 9, 10, 11, 12, 13]}
+              enc={['Prior.', 'Clase', 'SKU', 'Descripción', 'Tipo', `Meta ${osr}`, `En ${osr}`, 'Subir antes', 'Reponer durante', 'Total', `Fuera ${osr}`, 'Asignado', 'Bajo mínimo', 'Retenido (stock seg.)', 'Faltante', 'Ubic.', 'Estado']}
+              num={[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
               filas={r.ab.filas.map((x) => [x.prioridad, <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>, <span className="mono">{x.sku}</span>, <>{x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></>,
-                x.tipo === 'APTO OSR' ? <span className="note">Apto</span> : <span className="tag">requiere habilitar</span>, fmt(x.meta), fmt(x.osr), fmt(x.antes), fmt(x.durante), <b>{fmt(x.total)}</b>, fmt(x.fuera), fmt(x.asignado),
+                x.tipo === 'APTO OSR' ? <span className="note">Apto</span> : <span className="tag">requiere habilitar</span>, fmt(x.meta), fmt(x.osr), fmt(x.antes), fmt(x.durante), <b>{fmt(x.total)}</b>, fmt(x.fuera), x.asignado ? fmt(x.asignado) : '—', x.descartado ? fmt(x.descartado) : '—', x.retenido ? fmt(x.retenido) : '—',
                 x.faltante ? <b style={{ color: 'var(--bad)' }}>{fmt(x.faltante)}</b> : '—', x.nUb || '—', <span className={'pill ' + TONO_AB[x.estado]}>{LECTURA_AB[x.estado]}</span>])} />
           )}
+          {vista === 'esp' && (() => {
+            const e = r.recall;
+            return (
+              <>
+                <div className="grid-kpi">
+                  {tile('SKU que liberan espacio', fmt(e.skus), 'good', `el evento extrae al menos el ${fmt(e.umbral * 100, 0)}% de su stock en ${osr}`)}
+                  {tile(`Stock en ${osr} tras el traslado`, `${fmt(e.post)} u.`, '', 'de estos SKU (stock actual + traslado)')}
+                  {tile('Unidades que se extraen', `${fmt(e.libera)} u.`, 'good', `${fmt(e.post ? (e.libera / e.post) * 100 : 0, 0)}% de su stock en ${osr}`)}
+                  {tile('Totes que se desocupan', e.totes === null ? '—' : fmt(e.totes, 0), e.totes ? 'good' : '', e.totes === null ? 'carga la distribución de totes en Datos para estimarlos' : `estimado con la distribución de totes (${fmt(e.conTotes)} SKU)`)}
+                </div>
+                <p className="note" style={{ marginTop: -6 }}>Estos SKU vacían buena parte de su espacio durante el evento: ese espacio puede reservarse para reponer o ingresar más stock sin arriesgar la capacidad del {osr}. Totes que se desocupan = unidades extraídas / unidades por tote del SKU en la distribución cargada.</p>
+                <Tabla compacta total={e.total} n={e.filas.length}
+                  enc={['Clase', 'SKU / descripción', `En ${osr} hoy`, 'Traslado', `En ${osr} tras traslado`, 'Extracción proyectada', '% extracción', 'Queda al final', 'U. por tote', 'Totes que se desocupan']}
+                  num={[2, 3, 4, 5, 6, 7, 8, 9]}
+                  filas={e.filas.map((x) => [<span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>,
+                    <><span className="mono">{x.sku}</span> {x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></>,
+                    fmt(x.osr), x.traslado ? fmt(x.traslado) : '—', fmt(x.post), <b>{fmt(x.meta)}</b>, <b>{fmt(x.ext * 100, 0)}%</b>, x.queda ? fmt(x.queda) : '—',
+                    x.porTote ? fmt(x.porTote, 1) : '—', x.totes !== null ? fmt(x.totes, 1) : '—'])} />
+              </>
+            );
+          })()}
           {vista === 'pick' && (
             <Tabla total={r.ab.lineas} n={r.ab.picking.length}
               enc={['Nro', 'Ola', 'CD origen', 'Ubicación', 'SKU', 'Descripción', 'Unid. a mover', 'Stock al retirar', 'Saldo', 'Prior. SKU']}
@@ -473,17 +623,20 @@ function ReabastoProyeccion() {
           )}
         </>
       )}
+      <VariacionProyeccion rec={rec} onActivar={() => setRec(rec + 1)} />
     </div>
   );
 }
 
-function Tabla({ enc, num, filas, total, n }) {
+const MOTIVO_CORTO = { 'APTO (LOGISTICA_OSR=Y)': 'Y', 'CON STOCK EN OSR': 'Stock en OSR' };
+
+function Tabla({ enc, num, filas, total, n, compacta = false }) {
   return (
     <>
-      <div className="tbl" style={{ maxHeight: 440 }}>
+      <div className={'tbl' + (compacta ? ' tbl-compacta' : '')} style={{ maxHeight: 440 }}>
         <table>
           <thead><tr>{enc.map((e, j) => <th key={j} className={num.includes(j) ? 'num' : ''}>{e}</th>)}</tr></thead>
-          <tbody>{filas.map((f, i) => <tr key={i}>{f.map((v, j) => <td key={j} className={num.includes(j) ? 'num' : j === 3 ? 'wrap' : ''}>{v}</td>)}</tr>)}</tbody>
+          <tbody>{filas.map((f, i) => <tr key={i}>{f.map((v, j) => <td key={j} className={num.includes(j) ? 'num' : j === (compacta ? 2 : 3) ? 'wrap' : ''}>{v}</td>)}</tr>)}</tbody>
         </table>
       </div>
       {total > n && <p className="note">Se muestran {fmt(n)} de {fmt(total)} filas. El Excel trae todas.</p>}
