@@ -17,7 +17,7 @@ import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbast
 import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
-import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr } from '../gestion/services/totesOsr.js';
+import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr, cargarCapacidadOsr, borrarCapacidadOsr, capacidadOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
@@ -140,6 +140,12 @@ app.post('/optimizacion/osr/totes/distribucion', subir.single('archivo'), r(asyn
   return cargarDistribucionOsr(req.file.buffer, nombreArchivo(req.file));
 }));
 app.post('/optimizacion/osr/totes/distribucion/borrar', r(() => borrarDistribucionOsr()));
+app.post('/optimizacion/osr/capacidad', r((req) => capacidadOsr(req.body || {})));
+app.post('/optimizacion/osr/capacidad/cargar', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el archivo con la capacidad del OSR por rack line.'), { status: 400 });
+  return cargarCapacidadOsr(req.file.buffer, nombreArchivo(req.file));
+}));
+app.post('/optimizacion/osr/capacidad/borrar', r(() => borrarCapacidadOsr()));
 app.get('/optimizacion/osr/totes/excel', r(async (req, res) => {
   const q2 = { ...req.query, pot: req.query.pot ? JSON.parse(req.query.pot) : {} };
   return enviarXlsx(res, await archivoTotesOsr(q2));

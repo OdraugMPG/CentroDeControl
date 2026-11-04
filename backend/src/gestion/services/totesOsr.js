@@ -82,6 +82,72 @@ export async function borrarDistribucionOsr() {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Capacidad del OSR por rack line (carga en Datos): Rack line | Positions | Locked | Occupied | Load unit stacked | Free/available
+// La rack line 6 son ubicaciones de seguridad para el desplazamiento de la máquina: se informa pero no cuenta en la capacidad.
+// ---------------------------------------------------------------------------------------------
+const CLAVE_CAP = 'osrCapacidad';
+export const LINEAS_FUERA = ['6']; // rack lines que no cuentan como capacidad de almacenamiento
+
+export async function cargarCapacidadOsr(buffer, archivo) {
+  const wb = XLSX.read(buffer, { type: 'buffer', dense: true });
+  let m = null, f = -1, c = null, hoja = '';
+  for (const n of wb.SheetNames) {
+    m = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' });
+    for (let i = 0; i < Math.min(15, m.length); i++) {
+      const col = { linea: buscarCol(m[i], 'RACK LINE|RACKLINE|LINEA|RACK'), pos: buscarCol(m[i], 'POSITIONS|POSICIONES|CAPACIDAD'), lock: buscarCol(m[i], 'LOCKED|BLOQUEADAS|BLOQUEADO'),
+        occ: buscarCol(m[i], 'OCCUPIED|OCUPADAS|OCUPADO'), stack: buscarCol(m[i], 'LOAD UNIT STACKED|LOAD UNIT STACK|LOAD UNIT STAC|LOAD UNITS STACKED|LOAD UNIT|APILADAS'),
+        free: buscarCol(m[i], 'FREE/AVAILABLE|FREE / AVAILABLE|FREE|AVAILABLE|LIBRES|DISPONIBLES') };
+      if (col.linea >= 0 && col.pos >= 0 && col.occ >= 0) { f = i; c = col; break; }
+    }
+    if (f >= 0) { hoja = n; break; }
+  }
+  if (f < 0) throw errDist('No reconocí los encabezados: el archivo debe traer Rack line, Positions y Occupied (Locked, Load unit stacked y Free/available son opcionales).');
+  const filas = [];
+  for (const r of m.slice(f + 1)) {
+    const linea = digitosTxt(r[c.linea]);
+    if (!linea || !(num(r[c.pos]) > 0)) continue;
+    const v = (k) => (c[k] >= 0 ? num(r[c[k]]) : null);
+    filas.push({ linea, positions: v('pos'), locked: v('lock'), occupied: v('occ'), stacked: v('stack'), free: v('free') });
+  }
+  if (!filas.length) throw errDist('El archivo no trae rack lines con posiciones.');
+  filas.sort((a, b) => Number(a.linea) - Number(b.linea));
+  const valor = { archivo, hoja, cargado: hoyIso(), filas };
+  await q('INSERT INTO parametros (clave, valor) VALUES ($1,$2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [CLAVE_CAP, JSON.stringify(valor)]);
+  const cuentan = filas.filter((x) => !LINEAS_FUERA.includes(x.linea));
+  const s = (k) => cuentan.reduce((a, x) => a + (x[k] || 0), 0);
+  return { archivo, hoja, lineas: filas.length, cuentan: cuentan.length, positions: s('positions'), occupied: s('occupied') };
+}
+
+export async function borrarCapacidadOsr() {
+  await q('DELETE FROM parametros WHERE clave = $1', [CLAVE_CAP]);
+  return { ok: true };
+}
+
+const digitosTxt = (v) => { const g = String(v ?? '').match(/\d+/); return g ? String(Number(g[0])) : ''; };
+
+/** Capacidad del OSR por rack line con el target de ocupación (0,85 = 85%): solo cuentan las rack lines 1 a 5. */
+export async function capacidadOsr(params = {}) {
+  const { rows } = await q('SELECT valor FROM parametros WHERE clave = $1', [CLAVE_CAP]);
+  if (!rows.length) return { cargada: false };
+  const d = typeof rows[0].valor === 'string' ? JSON.parse(rows[0].valor) : rows[0].valor;
+  let target = Number(params.target);
+  if (!(target > 0)) target = 0.85;
+  if (target > 1) target /= 100;
+  const lineas = d.filas.map((x) => {
+    const cuenta = !LINEAS_FUERA.includes(x.linea);
+    const libre = x.free !== null && x.free !== undefined ? x.free : Math.max(0, x.positions - x.occupied - (x.locked || 0));
+    const meta = Math.floor(x.positions * target);
+    return { ...x, cuenta, libre, ocup: x.positions ? x.occupied / x.positions : 0, meta, hastaTarget: meta - x.occupied };
+  });
+  const c = lineas.filter((x) => x.cuenta);
+  const s = (k) => c.reduce((a, x) => a + (x[k] || 0), 0);
+  const tot = { positions: s('positions'), occupied: s('occupied'), locked: s('locked'), stacked: s('stacked'), libre: s('libre'), meta: s('meta') };
+  tot.ocup = tot.positions ? tot.occupied / tot.positions : 0;
+  tot.hastaTarget = tot.meta - tot.occupied;
+  return { cargada: true, archivo: d.archivo, hoja: d.hoja, cargado: d.cargado, target, lineas, tot, fuera: lineas.filter((x) => !x.cuenta).map((x) => x.linea) };
+}
+
 /** Distribución cargada: por SKU (clave normalizada) y datos de la carga; null si no hay. */
 async function distribucion() {
   const { rows } = await q('SELECT valor FROM parametros WHERE clave = $1', [CLAVE]);
