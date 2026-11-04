@@ -1,6 +1,7 @@
 // Estado compartido: sesión y permisos, catálogos (meta), foto en vivo (snapshot cada 5 min) y avisos.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
+import { esOscuro } from './tema.js';
 import { puede as puedeU } from './permisos.js';
 
 const Ctx = createContext(null);
@@ -86,15 +87,15 @@ export function useCarga(fn, deps = []) {
   return { ...estado, recargar, setData: d => setEstado(s => ({ ...s, data: typeof d === 'function' ? d(s.data) : d })) };
 }
 
-// Tema claro/oscuro, para que los gráficos se redibujen con los colores correctos
+// Tema claro/oscuro (elegido por el usuario o el del sistema), para que los gráficos se redibujen con los colores correctos
 export function useTema() {
-  const mq = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-  const [oscuro, setOscuro] = useState(mq ? mq.matches : false);
+  const [oscuro, setOscuro] = useState(esOscuro);
   useEffect(() => {
-    if (!mq) return;
-    const f = e => setOscuro(e.matches);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const f = () => setOscuro(esOscuro());
     mq.addEventListener('change', f);
-    return () => mq.removeEventListener('change', f);
-  }, [mq]);
+    window.addEventListener('tema', f);
+    return () => { mq.removeEventListener('change', f); window.removeEventListener('tema', f); };
+  }, []);
   return oscuro;
 }

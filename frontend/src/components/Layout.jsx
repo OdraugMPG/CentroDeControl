@@ -4,7 +4,19 @@ import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApp } from '../lib/contexto.jsx';
 import { hhmm, fechaHora } from '../lib/fmt.js';
 import { MODULOS, vistaDe, vistasDe, primeraRuta, puede } from '../lib/permisos.js';
+import { TEMAS, leerTema, aplicarTema } from '../lib/tema.js';
 import { Login, CambiarClave } from './Acceso.jsx';
+
+// Claro / oscuro / automático: se recuerda en este navegador
+function SelectorTema() {
+  const [tema, setTema] = useState(leerTema);
+  const cambiar = t => { setTema(t); aplicarTema(t); };
+  return (
+    <div className="tema" role="group" aria-label="Tema de la pantalla">
+      {TEMAS.map(([k, l]) => <button key={k} type="button" aria-pressed={tema === k} title={`Tema ${l.toLowerCase()}`} onClick={() => cambiar(k)}>{{ auto: 'Auto', claro: '☀ Claro', oscuro: '☾ Oscuro' }[k]}</button>)}
+    </div>
+  );
+}
 
 function Reloj() {
   const { proxima } = useApp();
@@ -70,6 +82,7 @@ export default function Layout() {
               {error ? 'Sin conexión con el servidor' : snap?.corte ? `Datos al ${hhmm(snap.corte)}` : 'Sin extracciones cargadas'}
             </span>
             <Reloj />
+            <SelectorTema />
             <button type="button" className="ghost" onClick={refrescar} disabled={cargando}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
             <Cuenta onClave={() => setClave(true)} />
           </div>

@@ -8,7 +8,7 @@ ChartJS.register(BarController, LineController, BarElement, LineElement, PointEl
 
 const nf = new Intl.NumberFormat('es-CL');
 
-export default function Grafico({ datos, opciones = {}, alto = 260, apilado = false, horizontal = false, leyenda = true, label }) {
+export default function Grafico({ datos, opciones = {}, alto = 260, apilado = false, horizontal = false, leyenda = true, label, plugins }) {
   const oscuro = useTema();
   ChartJS.defaults.font.family = css('--body');
   ChartJS.defaults.color = css('--muted');
@@ -33,7 +33,7 @@ export default function Grafico({ datos, opciones = {}, alto = 260, apilado = fa
   };
   return (
     <div className="chart" style={{ height: alto }}>
-      <Chart key={oscuro ? 'd' : 'l'} type="bar" data={datos} options={merge(base, opciones)} aria-label={label} role="img" />
+      <Chart key={oscuro ? 'd' : 'l'} type="bar" data={datos} options={merge(base, opciones)} plugins={plugins} aria-label={label} role="img" />
     </div>
   );
 }

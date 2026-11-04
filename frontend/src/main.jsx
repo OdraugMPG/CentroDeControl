@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './styles.css';
 import { AppProvider } from './lib/contexto.jsx';
+import { aplicarTema, leerTema } from './lib/tema.js';
 import Layout from './components/Layout.jsx';
 import Resumen from './pages/control/Resumen.jsx';
 import Recepcion from './pages/control/Recepcion.jsx';
@@ -25,6 +26,8 @@ import Configuracion from './pages/config/Configuracion.jsx';
 import Gestion from './pages/gestion/Gestion.jsx';
 import Usuarios from './pages/admin/Usuarios.jsx';
 import Roles from './pages/admin/Roles.jsx';
+
+aplicarTema(leerTema());
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

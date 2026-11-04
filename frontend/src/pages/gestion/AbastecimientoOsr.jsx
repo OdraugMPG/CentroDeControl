@@ -923,7 +923,7 @@ function CapacidadOsr() {
   const [r] = useSimulacion('/api/optimizacion/osr/capacidad', { target: target === '' ? 85 : Number(target) }, [target]);
   const cambiar = (v) => { setTarget(v); try { localStorage.setItem(CLAVE_TARGET, v); } catch { /* sin almacenamiento */ } };
   if (!r) return null;
-  if (!r.cargada) return <div className="alert warn" style={{ marginBottom: 12 }}>Sin capacidad del OSR por rack line. <IrACarga id="osrcap" etiqueta="Cargar capacidad (en Datos)" /></div>;
+  if (!r.cargada) return <div className="alert warn" style={{ marginBottom: 12 }}>Sin capacidad del OSR por línea de rack. <IrACarga id="osrcap" etiqueta="Cargar capacidad (en Datos)" /></div>;
   const t = r.tot, l = r.lineas.filter((x) => x.cuenta);
   const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
   const sobre = t.occupied > t.meta;
@@ -931,31 +931,40 @@ function CapacidadOsr() {
     <div className="sec" style={{ marginBottom: 16 }}>
       <div className="row spread" style={{ alignItems: 'flex-end', marginBottom: 6 }}>
         <div>
-          <h2 style={{ margin: 0 }}>Warehouse capacity del OSR</h2>
-          <p className="note" style={{ margin: '2px 0 0' }}>{r.archivo} · cargada {fFecha(r.cargado)} · rack lines 1 a {l.length ? l[l.length - 1].linea : 5}{r.fuera.length ? ` (rack line ${r.fuera.join(', ')}: seguridad de la máquina, no cuenta)` : ''} <IrACarga id="osrcap" etiqueta="Reemplazar (en Datos)" /></p>
+          <h2 style={{ margin: 0 }}>Capacidad de almacenamiento del OSR</h2>
+          <p className="note" style={{ margin: '2px 0 0' }}>{r.archivo} · cargada {fFecha(r.cargado)} · líneas de rack 1 a {l.length ? l[l.length - 1].linea : 5}{r.fuera.length ? ` (línea ${r.fuera.join(', ')}: seguridad de la máquina, no cuenta)` : ''} <IrACarga id="osrcap" etiqueta="Reemplazar (en Datos)" /></p>
         </div>
         <div><label className="lbl" htmlFor="cap-tg">Target de ocupación %</label>
           <input id="cap-tg" type="number" className="w90" min="1" max="100" placeholder="85" value={target} onChange={(e) => cambiar(e.target.value)} /></div>
       </div>
       <div className="grid-kpi kpi-fila">
-        {tile('Positions', fmt(t.positions), '', `capacidad de ${l.length} rack lines`)}
-        {tile('Occupied', fmt(t.occupied), '', `posiciones ocupadas${t.locked ? ` · ${fmt(t.locked)} locked` : ''}`)}
+        {tile('Posiciones', fmt(t.positions), '', `capacidad de ${l.length} líneas de rack`)}
+        {tile('Ocupadas', fmt(t.occupied), '', `posiciones ocupadas${t.locked ? ` · ${fmt(t.locked)} bloqueadas` : ''}`)}
         {tile('% de ocupación', `${fmt(t.ocup * 100, 1)}%`, sobre ? 'bad' : t.ocup >= r.target - 0.05 ? 'warn' : 'good', `target ${fmt(r.target * 100, 0)}%`)}
         {tile(`Target ${fmt(r.target * 100, 0)}%`, fmt(t.meta), '', 'posiciones máximas a ocupar')}
         {tile(sobre ? 'Sobre el target' : 'Margen hasta el target', `${sobre ? '+' : ''}${fmt(Math.abs(t.hastaTarget))}`, sobre ? 'bad' : 'good', sobre ? 'posiciones por liberar para volver al target' : 'posiciones que se pueden ocupar sin pasar el target')}
-        {tile('Free / available', fmt(t.libre), '', `${fmt(t.positions ? (t.libre / t.positions) * 100 : 0, 1)}% de las posiciones`)}
+        {tile('Libres', fmt(t.libre), '', `${fmt(t.positions ? (t.libre / t.positions) * 100 : 0, 1)}% de las posiciones`)}
       </div>
       <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)', alignItems: 'start' }}>
-        <Grafico alto={280} label="Posiciones, ocupación y target por rack line" datos={{
-          labels: l.map((x) => `Rack line ${x.linea}`),
+        <Grafico alto={280} label="Ocupación y target por línea de rack, en % de sus posiciones" datos={{
+          // todo en % de las posiciones de cada línea: la barra gris es el 100% (capacidad), la de ocupadas va dentro de ella
+          // y el target es una línea recta a la misma altura en todas
+          labels: l.map((x) => `Línea ${x.linea}`),
           datasets: [
-            { type: 'line', label: `Target ${fmt(r.target * 100, 0)}%`, data: l.map((x) => x.meta), borderColor: css('--red'), backgroundColor: css('--red'), borderDash: [6, 4], borderWidth: 2, pointRadius: 3, order: 0 },
-            { label: 'Positions', data: l.map((x) => x.positions), backgroundColor: css('--empty'), borderRadius: 2, order: 2 },
-            { label: 'Occupied', data: l.map((x) => x.occupied), backgroundColor: l.map((x) => (x.occupied > x.meta ? css('--yellow') : css('--teal'))), borderRadius: 2, order: 1 },
-          ] }} opciones={{ plugins: { tooltip: { callbacks: { afterBody: (it) => { const x = l[it[0].dataIndex]; return `Ocupación ${fmt(x.ocup * 100, 1)}%`; } } } } }} />
+            { type: 'line', label: `Target ${fmt(r.target * 100, 0)}%`, data: l.map(() => r.target * 100), borderColor: css('--red'), backgroundColor: css('--red'), borderDash: [6, 4], borderWidth: 2, pointRadius: 0, pointHoverRadius: 0, tension: 0, order: 0 },
+            { label: 'Posiciones (100%)', data: l.map(() => 100), backgroundColor: css('--empty'), borderRadius: 4, grouped: false, barPercentage: 0.7, order: 2 },
+            { label: 'Ocupadas', data: l.map((x) => x.ocup * 100), backgroundColor: l.map((x) => (x.occupied > x.meta ? css('--yellow') : css('--teal'))), borderRadius: 4, grouped: false, barPercentage: 0.7, order: 1 },
+          ] }} opciones={{
+            scales: { y: { min: 0, max: 100, ticks: { stepSize: 20, callback: (v) => `${v}%` } } },
+            plugins: { tooltip: { callbacks: {
+              label: (c) => {
+                const x = l[c.dataIndex];
+                if (c.datasetIndex === 0) return c.dataset.label;
+                return c.datasetIndex === 1 ? `Posiciones: ${fmt(x.positions)}` : `Ocupadas: ${fmt(x.occupied)} (${fmt(x.ocup * 100, 1)}%)`;
+              } } } } }} />
         <div className="tbl">
           <table>
-            <thead><tr><th>Rack line</th><th className="num">Positions</th><th className="num">Occupied</th><th className="num">% ocup.</th><th className="num">Locked</th><th className="num">Free</th><th className="num">Vs target</th></tr></thead>
+            <thead><tr><th>Línea de rack</th><th className="num">Posiciones</th><th className="num">Ocupadas</th><th className="num">% ocupación</th><th className="num">Bloqueadas</th><th className="num">Libres</th><th className="num">Vs target</th></tr></thead>
             <tbody>
               {r.lineas.map((x) => (
                 <tr key={x.linea} className={x.cuenta ? '' : 'muted'}>
@@ -970,7 +979,7 @@ function CapacidadOsr() {
           </table>
         </div>
       </div>
-      <p className="note">Vs target = posiciones que se pueden ocupar hasta el target (positivo) o que sobran sobre el target (negativo). Barras en amarillo = rack line sobre el target.</p>
+      <p className="note">Vs target = posiciones que se pueden ocupar hasta el target (positivo) o que sobran sobre el target (negativo). Gráfico en % de las posiciones de cada línea: la barra gris es su capacidad (100%), la de ocupadas va dentro y la línea roja es el target. Barras en amarillo = línea de rack sobre el target.</p>
     </div>
   );
 }

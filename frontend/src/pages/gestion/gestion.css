@@ -247,3 +247,7 @@
 .gd .tbl-compacta td{padding:7px 6px}
 .gd .tbl-compacta td.wrap{min-width:220px}
 .gd .tbl-compacta .pill{white-space:normal;line-height:1.25;text-align:center}
+/* paleta institucional en Gestión diaria: tarjetas redondeadas con sombra suave y botón principal azul */
+.gd .sec,.gd .kpi{border-radius:12px;box-shadow:var(--sombra)}
+.gd .btn{border-radius:8px}
+.gd .btn.primary{color:#fff}

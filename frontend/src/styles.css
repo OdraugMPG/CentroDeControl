@@ -1,16 +1,17 @@
 :root{
-  --bg:#E8E9E4;--panel:#F7F7F4;--ink:#17212B;--muted:#5B6570;--line:#CDD0C8;--empty:#DADCD5;
-  --yellow:#E0A200;--teal:#1F6F6A;--red:#B83A2B;--blue:#2B4C7E;--violet:#6A4C93;--green:#3F7D3A;--slate:#2E3A46;
+  --bg:#F3F6FA;--panel:#FFFFFF;--ink:#1B2B3A;--muted:#5F6F82;--line:#DCE4EE;--empty:#E7EDF5;
+  --yellow:#F0A35E;--teal:#3AA89B;--red:#DC5F45;--blue:#1877E6;--violet:#7C5CC4;--green:#1E8E3E;--slate:#34525F;
+  --barra1:#0B3F8C;--barra2:#1565D8;--sombra:0 1px 3px rgba(16,42,84,.07),0 1px 2px rgba(16,42,84,.04);
   --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
   --body:"Barlow","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#141A1F;--panel:#1C232A;--ink:#E6E8E3;--muted:#98A1A9;--line:#2F3841;--empty:#2A333B;
-  --yellow:#F2B705;--teal:#3FA39B;--red:#E0604F;--blue:#7196CC;--violet:#A58BD0;--green:#71B36A;--slate:#5D6B78;color-scheme:dark}}
+  --bg:#0F1720;--panel:#17212C;--ink:#E6EDF5;--muted:#97A6B8;--line:#273546;--empty:#1F2B39;
+  --yellow:#F4B074;--teal:#4FC1B2;--red:#F08A72;--blue:#4C9CF2;--violet:#A58BE0;--green:#4CC26E;--slate:#6F8E9C;--barra1:#0A2A57;--barra2:#11458F;--sombra:none;color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#141A1F;--panel:#1C232A;--ink:#E6E8E3;--muted:#98A1A9;--line:#2F3841;--empty:#2A333B;
-  --yellow:#F2B705;--teal:#3FA39B;--red:#E0604F;--blue:#7196CC;--violet:#A58BD0;--green:#71B36A;--slate:#5D6B78;color-scheme:dark}
+  --bg:#0F1720;--panel:#17212C;--ink:#E6EDF5;--muted:#97A6B8;--line:#273546;--empty:#1F2B39;
+  --yellow:#F4B074;--teal:#4FC1B2;--red:#F08A72;--blue:#4C9CF2;--violet:#A58BE0;--green:#4CC26E;--slate:#6F8E9C;--barra1:#0A2A57;--barra2:#11458F;--sombra:none;color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);padding-bottom:env(safe-area-inset-bottom,0px)}
 .wrap{max-width:1600px;margin:0 auto;padding:0 16px 40px}
@@ -328,3 +329,30 @@ textarea.sum{min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospa
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .card.resaltar{outline:2px solid var(--blue);outline-offset:2px;transition:outline-color .6s}
+/* selector de tema (claro / oscuro / automático) en la barra superior */
+.tema{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:var(--panel);padding:2px}
+.tema button{background:none;border:0;border-radius:999px;color:var(--muted);font:inherit;font-size:12.5px;padding:3px 9px;cursor:pointer}
+.tema button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:600}
+
+/* ---------- paleta institucional: barra azul, tarjetas blancas redondeadas, botón principal azul ---------- */
+.appbar{background:var(--panel);border-bottom:1px solid var(--line);box-shadow:var(--sombra)}
+.appbar .in{background:linear-gradient(90deg,var(--barra1),var(--barra2));max-width:none;padding:10px max(16px,calc((100% - 1600px) / 2 + 16px));color:#fff}
+.appbar .in h1 a{color:#fff}
+.modnav a{color:rgba(255,255,255,.78);border-radius:8px;padding:6px 12px}
+.modnav a:hover{color:#fff;background:rgba(255,255,255,.12)}
+.modnav a.active{background:#fff;color:var(--barra1)}
+.appbar .live{color:rgba(255,255,255,.85)}
+.appbar .ghost{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35);color:#fff}
+.appbar .ghost:hover{border-color:#fff}
+.appbar .who{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35);color:#fff}
+.appbar .who b{color:#fff}
+.appbar .who button{color:#fff}
+.appbar .tema{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35)}
+.appbar .tema button{color:rgba(255,255,255,.85)}
+.appbar .tema button[aria-pressed="true"]{background:#fff;color:var(--barra1)}
+.subnav{padding-top:4px}
+.subnav a.active{color:var(--blue);border-color:var(--blue)}
+.btn{background:var(--blue);color:#fff;border-radius:8px}
+.card,.pnl,.kpis{border-radius:12px;box-shadow:var(--sombra)}
+.ghost{border-radius:8px}
+input[type=text],input[type=number],input[type=date],input[type=search],select,textarea{background:var(--panel);border-radius:8px}
