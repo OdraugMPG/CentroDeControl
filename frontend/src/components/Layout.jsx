@@ -71,7 +71,7 @@ export default function Layout() {
       <header className="appbar">
         <div className="in">
           <div className="brand">
-            <h1><NavLink to={inicio || '/'}>Centro de control del CD</NavLink></h1>
+            <h1><NavLink to={inicio || '/'}>Centro de Control</NavLink></h1>
             <nav className="modnav" aria-label="Módulos">
               {modulos.map(([k, l, vs]) => <NavLink key={k} to={vs[0][0]} className={() => modulo === k ? 'active' : ''}>{l}</NavLink>)}
             </nav>

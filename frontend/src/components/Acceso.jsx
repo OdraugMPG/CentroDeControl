@@ -9,7 +9,7 @@ function Marco({ titulo, sub, children }) {
   return (
     <div className="wrap">
       <div className="login">
-        <h1>Centro de control del CD</h1>
+        <h1>Centro de Control</h1>
         <h2>{titulo}</h2>
         {sub && <p className="muted">{sub}</p>}
         {children}
