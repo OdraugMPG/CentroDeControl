@@ -306,10 +306,10 @@ async function infoCarga() {
 // ---------------------------------------------------------------------------------------------
 /** Greedy: SKU candidatos de mayor venta en otros CD primero, hasta cubrir lo que falta para el target. */
 function simular(lista, target) {
-  let u = 0, obj = 0, potCand = 0, potNo = 0, potEn = 0;
+  let u = 0, obj = 0, potCand = 0, potY = 0, potNo = 0, potEn = 0;
   for (const x of lista) {
     u += x.u; obj += x.uObj;
-    if (x.cand) potCand += x.otros; else if (x.estado === ESTADOS.NO) potNo += x.otros; else if (x.estado === ESTADOS.EN) potEn += x.otros;
+    if (x.cand) { potCand += x.otros; if (x.estado === ESTADOS.CAND) potY += x.otros; } else if (x.estado === ESTADOS.NO) potNo += x.otros; else if (x.estado === ESTADOS.EN) potEn += x.otros;
   }
   const brecha = Math.max(0, target * u - obj);
   const sel = [];
@@ -322,7 +322,8 @@ function simular(lista, target) {
   }
   const p = (v) => (u ? v / u : 0);
   return { u, obj, pct: p(obj), brecha, sel, nSel: sel.length, cub, pctRes: p(obj + cub), alcanza: cub >= brecha - 1e-9,
-    potCand, pctMax: p(obj + potCand), potNo, pctMaxNo: p(obj + potCand + potNo), potEn };
+    // máximo alcanzable: solo SKU con Logística OSR = Y que hoy no están en OSR
+    potCand, potY, pctMax: p(obj + potY), potNo, pctMaxNo: p(obj + potCand + potNo), potEn };
 }
 
 async function calcular(params = {}) {
@@ -490,7 +491,7 @@ export async function archivoParticipacion(params = {}) {
     [],
     ['Unidades', total.u], [`Unidades ${cdObj}`, sim.obj], [`% ${cdObj} hoy`, r1(sim.pct)], ['Unidades que faltan para el target', Math.round(sim.brecha)],
     ['SKU aptos sin OSR a ingresar', sim.nSel], ['Unidades que cubren', sim.cub], [`% ${cdObj} con el ingreso`, r1(sim.pctRes)],
-    ['% máximo con todos los aptos sin OSR', r1(sim.pctMax)], ['% máximo habilitando además los no aptos', r1(sim.pctMaxNo)],
+    ['% máximo con SKU Logística OSR = Y fuera de OSR', r1(sim.pctMax)], ['% máximo habilitando además los no aptos', r1(sim.pctMaxNo)],
     [],
     ['CD', 'Unidades', '% participación', 'SKU'],
     ...porCd.map((c) => [c.cd, c.u, r1(c.pct), c.skus]),

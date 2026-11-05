@@ -98,7 +98,7 @@ export default function ParticipacionCd() {
               {tile('Faltan para el target', `${fmt(s.brecha)} u.`, s.brecha > 0 ? 'warn' : 'good', s.brecha > 0 ? `${pct(s.u ? s.brecha / s.u : 0)} de la venta tiene que pasar a ${obj}` : 'el target ya se cumple')}
               {tile('SKU aptos a ingresar', fmt(s.nSel), '', `${fmt(s.cub)} u. de venta que hoy salen de otros CD`)}
               {tile(`${obj} con el ingreso`, pct(s.pctRes), s.alcanza ? 'good' : 'bad', s.alcanza ? `${r.modo === 'depto' ? 'cumpliendo en cada depto' : 'cumple el target'}` : `no alcanza: el máximo con aptos es ${pct(s.pctMax)}`)}
-              {tile('Máximo alcanzable', `${pct(s.pctMax)} → ${pct(s.pctMaxNo)}`, '', `con todos los aptos → habilitando además no aptos · ${fmt(s.potEn)} u. de SKU ya en ${obj} salen de otros CD`)}
+              {tile('Máximo alcanzable', pct(s.pctMax), '', `ingresando todos los SKU con Logística OSR = "Y" que no están en ${obj} (${fmt(s.potY)} u. que hoy salen de otros CD)`)}
             </div>
 
             <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,2fr) minmax(0,3fr)' }}>
