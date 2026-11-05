@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { q } from '../db.js';
 import { ah, bad } from './util.js';
+import { consumoVsStock } from '../services/olasConsumo.js';
 
 const r = Router();
 export const BLANCO = '(en blanco)';
@@ -104,6 +105,14 @@ r.post('/detalle', ah(async (req, res) => {
        FROM olas_lineas WHERE ${w.sql} ORDER BY fecha_salida, od, sku LIMIT ${limite}`, w.params)
   ]);
   res.json({ total: t.total, unidades: t.unidades, lineas: rows });
+}));
+
+// Consumo de la ola vs stock de la Base en cada CD y reabasto del OSR (con los mismos filtros del simulador)
+r.post('/consumo', ah(async (req, res) => {
+  const carga = await ultima();
+  if (!carga) return res.json({ carga: null });
+  const b = req.body || {};
+  res.json({ carga, ...(await consumoVsStock(donde(carga.id, b.filtros), { minOsr: Math.max(0, Number(b.minOsr) || 0), incluirY: !!b.incluirY })) });
 }));
 
 export default r;

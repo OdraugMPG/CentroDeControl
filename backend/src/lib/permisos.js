@@ -41,7 +41,7 @@ export const REGLAS = [
   R('POST', '/cargas/olas', 'da.cargas', 'op.olas'),
   R('POST', '/cargas/[^/]+', 'da.cargas'),
   R('DELETE', '/cargas/[^/]+', 'da.cargas'),
-  R('POST', '/olas/(pivot|detalle)', 'op.olas'),          // consultas con filtros en el cuerpo
+  R('POST', '/olas/(pivot|detalle|consumo)', 'op.olas'),          // consultas con filtros en el cuerpo
   // Datos: metas, calendario, causas y parámetros
   R('(PUT|POST|PATCH)', '/config/.*', 'da.configuracion'),
   // Continuidad

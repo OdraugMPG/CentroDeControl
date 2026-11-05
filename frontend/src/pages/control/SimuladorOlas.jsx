@@ -5,6 +5,7 @@ import { useCarga } from '../../lib/contexto.jsx';
 import { api } from '../../lib/api.js';
 import { Kpis, Card, Cargando, PageHead, Segmentador } from '../../components/ui.jsx';
 import Grafico from '../../components/Grafico.jsx';
+import ConsumoOlas from './ConsumoOlas.jsx';
 import { N, css, fechaHora, REGIONES } from '../../lib/fmt.js';
 
 // Mismos segmentadores que la planilla de Excel
@@ -141,6 +142,8 @@ export default function SimuladorOlas() {
               ? cols.map((c, i) => ({ label: etC(c), backgroundColor: css(PAL[i % PAL.length]), borderRadius: 2, data: p.claveFilas.map(f => p.valores[f]?.[c] || 0) }))
               : [{ label: 'Total', backgroundColor: css('--blue'), borderRadius: 2, data: p.claveFilas.map(f => p.totFila[f]) }] }} />
         </Card>)}
+
+      <ConsumoOlas filtros={aListas(filtros)} cargaId={cargaId} />
 
       {sel && (
         <section className="card" ref={detalle}>
