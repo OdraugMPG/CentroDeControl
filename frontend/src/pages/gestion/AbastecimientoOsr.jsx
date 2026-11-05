@@ -9,6 +9,7 @@ import { css } from '../../lib/fmt.js';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 
+const TONO = { A: 'm-0', B: 'm-2', C: 'm-4' };
 const CLASES_OSR = ['AX', 'AY', 'BX', 'BY'];
 const LECTURA_ESTADO = {
   REVISION: 'Están en OSR pero falta confirmar si son aptos. Confirmar primero los de clase A (más venta): si pasan a "Y", ya suman al automático.',
@@ -518,7 +519,7 @@ function ReabastoProyeccion() {
             <table>
               <thead><tr>{thD('nom', 'Depto', '')}{thD('proy', 'Unidades proyectadas')}{thD('partProy', '% participación')}{thD('osrStock', `Stock en ${osr}`)}{thD('partOsr', `% del stock ${osr}`)}
                 {thD('meta', 'Meta')}
-                {thD('antes', 'Subir antes')}{thD('asig', 'Cubierta con stock total')}{thD('cob', 'Cobertura')}{thD('brecha', 'Brecha')}{...(c.olas > 1 ? [thD('durante', 'Reponer durante')] : [])}{thD('estado', 'Estado', '')}</tr></thead>
+                {thD('antes', 'Subir antes')}{thD('asig', 'Cubierta con stock total')}{thD('cob', 'Cobertura')}{thD('brecha', 'Brecha')}{c.olas > 1 && thD('durante', 'Reponer durante')}{thD('estado', 'Estado', '')}</tr></thead>
               <tbody>
                 {ordenarD(depPart).map((x) => (
                   <tr key={x.nom} className={f.depto === x.nom ? 'sel' : ''} style={{ cursor: 'pointer' }} onClick={() => alt('depto', x.nom)} title="Filtrar por este depto">
@@ -917,9 +918,17 @@ function TipoPorDepto({ deptos, ord, setOrd, onDepto }) {
 // =============================================================================================
 const CLAVE_TARGET = 'osrTargetCapacidad';
 const leerTarget = () => { try { return localStorage.getItem(CLAVE_TARGET) || ''; } catch { return ''; } };
+const CLAVE_AVISO = 'osrAvisoCapacidad';
+const leerAviso = () => { try { return localStorage.getItem(CLAVE_AVISO) || ''; } catch { return ''; } };
+// Semáforo de ocupación: sobre el target (rojo, parpadeo rápido), a menos de "aviso" puntos del target (amarillo, parpadeo lento) o bajo (verde)
+const SEMAFORO = { sobre: ['Sobre el target', '--red'], cerca: ['Cerca del target', '--yellow'], ok: ['Bajo el target', '--teal'] };
+const estadoCap = (ocup, target, aviso) => (ocup > target ? 'sobre' : ocup >= target - aviso ? 'cerca' : 'ok');
+const Luz = ({ e, titulo }) => <span className={`sem sem-${e}`} role="img" aria-label={titulo || SEMAFORO[e][0]} title={titulo || SEMAFORO[e][0]} />;
 
 function CapacidadOsr() {
   const [target, setTarget] = useState(leerTarget);
+  const [aviso, setAviso] = useState(leerAviso);
+  const cambiarAviso = (v) => { setAviso(v); try { localStorage.setItem(CLAVE_AVISO, v); } catch { /* sin almacenamiento */ } };
   const [r] = useSimulacion('/api/optimizacion/osr/capacidad', { target: target === '' ? 85 : Number(target) }, [target]);
   const cambiar = (v) => { setTarget(v); try { localStorage.setItem(CLAVE_TARGET, v); } catch { /* sin almacenamiento */ } };
   if (!r) return null;
@@ -927,6 +936,10 @@ function CapacidadOsr() {
   const t = r.tot, l = r.lineas.filter((x) => x.cuenta);
   const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
   const sobre = t.occupied > t.meta;
+  const av = (aviso === '' ? 3 : Math.max(0, Number(aviso) || 0)) / 100;
+  const est = (x) => estadoCap(x.ocup, r.target, av);
+  const eTot = est(t);
+  const alertas = l.filter((x) => est(x) !== 'ok').sort((a, b) => b.ocup - a.ocup);
   return (
     <div className="sec" style={{ marginBottom: 16 }}>
       <div className="row spread" style={{ alignItems: 'flex-end', marginBottom: 6 }}>
@@ -934,8 +947,21 @@ function CapacidadOsr() {
           <h2 style={{ margin: 0 }}>Capacidad de almacenamiento del OSR</h2>
           <p className="note" style={{ margin: '2px 0 0' }}>{r.archivo} · cargada {fFecha(r.cargado)} · líneas de rack 1 a {l.length ? l[l.length - 1].linea : 5}{r.fuera.length ? ` (línea ${r.fuera.join(', ')}: seguridad de la máquina, no cuenta)` : ''} <IrACarga id="osrcap" etiqueta="Reemplazar (en Datos)" /></p>
         </div>
-        <div><label className="lbl" htmlFor="cap-tg">Target de ocupación %</label>
-          <input id="cap-tg" type="number" className="w90" min="1" max="100" placeholder="85" value={target} onChange={(e) => cambiar(e.target.value)} /></div>
+        <div className="row" style={{ gap: 12 }}>
+          <div><label className="lbl" htmlFor="cap-tg">Target de ocupación %</label>
+            <input id="cap-tg" type="number" className="w90" min="1" max="100" placeholder="85" value={target} onChange={(e) => cambiar(e.target.value)} /></div>
+          <div><label className="lbl" htmlFor="cap-av">Avisar a (puntos bajo el target)</label>
+            <input id="cap-av" type="number" className="w90" min="0" max="50" step="0.5" placeholder="3" value={aviso} onChange={(e) => cambiarAviso(e.target.value)} /></div>
+        </div>
+      </div>
+      <div className={`semaforo sem-borde-${alertas.some((x) => est(x) === 'sobre') ? 'sobre' : alertas.length ? 'cerca' : 'ok'}`} role="status" aria-live="polite">
+        <div className="sem-luces">
+          {l.map((x) => <span key={x.linea} className="sem-linea"><Luz e={est(x)} titulo={`Línea ${x.linea}: ${fmt(x.ocup * 100, 1)}% · ${SEMAFORO[est(x)][0]}`} />Línea {x.linea} <b>{fmt(x.ocup * 100, 1)}%</b></span>)}
+          <span className="sem-linea sem-total"><Luz e={eTot} />Total <b>{fmt(t.ocup * 100, 1)}%</b></span>
+        </div>
+        <p className="sem-texto">{alertas.length
+          ? alertas.map((x) => `Línea ${x.linea} ${est(x) === 'sobre' ? `sobre el target (${fmt(x.ocup * 100, 1)}%, ${fmt(-x.hastaTarget)} posiciones de más)` : `cerca del target (${fmt(x.ocup * 100, 1)}%, quedan ${fmt(x.hastaTarget)} posiciones)`}`).join(' · ')
+          : `Todas las líneas bajo el target, a más de ${fmt(av * 100, 1)} puntos.`}</p>
       </div>
       <div className="grid-kpi kpi-fila">
         {tile('Posiciones', fmt(t.positions), '', `capacidad de ${l.length} líneas de rack`)}
@@ -953,7 +979,7 @@ function CapacidadOsr() {
           datasets: [
             { type: 'line', label: `Target ${fmt(r.target * 100, 0)}%`, data: l.map(() => r.target * 100), borderColor: css('--red'), backgroundColor: css('--red'), borderDash: [6, 4], borderWidth: 2, pointRadius: 0, pointHoverRadius: 0, tension: 0, order: 0 },
             { label: 'Posiciones (100%)', data: l.map(() => 100), backgroundColor: css('--empty'), borderRadius: 4, grouped: false, barPercentage: 0.7, order: 2 },
-            { label: 'Ocupadas', data: l.map((x) => x.ocup * 100), backgroundColor: l.map((x) => (x.occupied > x.meta ? css('--yellow') : css('--teal'))), borderRadius: 4, grouped: false, barPercentage: 0.7, order: 1 },
+            { label: 'Ocupadas', data: l.map((x) => x.ocup * 100), backgroundColor: l.map((x) => css(SEMAFORO[est(x)][1])), borderRadius: 4, grouped: false, barPercentage: 0.7, order: 1 },
           ] }} opciones={{
             scales: { y: { min: 0, max: 100, ticks: { stepSize: 20, callback: (v) => `${v}%` } } },
             plugins: { tooltip: { callbacks: {
@@ -968,18 +994,18 @@ function CapacidadOsr() {
             <tbody>
               {r.lineas.map((x) => (
                 <tr key={x.linea} className={x.cuenta ? '' : 'muted'}>
-                  <td>{x.linea}{!x.cuenta && <span className="note"> · seguridad</span>}</td><td className="num">{fmt(x.positions)}</td><td className="num">{fmt(x.occupied)}</td>
-                  <td className="num"><b style={{ color: x.cuenta && x.occupied > x.meta ? 'var(--bad)' : undefined }}>{fmt(x.ocup * 100, 1)}%</b></td>
+                  <td>{x.cuenta && <Luz e={est(x)} />}{x.linea}{!x.cuenta && <span className="note"> · seguridad</span>}</td><td className="num">{fmt(x.positions)}</td><td className="num">{fmt(x.occupied)}</td>
+                  <td className="num"><b style={{ color: x.cuenta ? { sobre: 'var(--red)', cerca: 'var(--yellow)' }[est(x)] : undefined }}>{fmt(x.ocup * 100, 1)}%</b></td>
                   <td className="num">{x.locked ? fmt(x.locked) : '—'}</td><td className="num">{fmt(x.libre)}</td>
                   <td className="num">{x.cuenta ? <span style={{ color: x.hastaTarget < 0 ? 'var(--bad)' : undefined }}>{x.hastaTarget > 0 ? '+' : ''}{fmt(x.hastaTarget)}</span> : <span className="muted">—</span>}</td>
                 </tr>
               ))}
-              <tr className="tot"><td>Total 1-{l.length ? l[l.length - 1].linea : 5}</td><td className="num">{fmt(t.positions)}</td><td className="num">{fmt(t.occupied)}</td><td className="num">{fmt(t.ocup * 100, 1)}%</td><td className="num">{fmt(t.locked)}</td><td className="num">{fmt(t.libre)}</td><td className="num">{t.hastaTarget > 0 ? '+' : ''}{fmt(t.hastaTarget)}</td></tr>
+              <tr className="tot"><td><Luz e={eTot} />Total 1-{l.length ? l[l.length - 1].linea : 5}</td><td className="num">{fmt(t.positions)}</td><td className="num">{fmt(t.occupied)}</td><td className="num">{fmt(t.ocup * 100, 1)}%</td><td className="num">{fmt(t.locked)}</td><td className="num">{fmt(t.libre)}</td><td className="num">{t.hastaTarget > 0 ? '+' : ''}{fmt(t.hastaTarget)}</td></tr>
             </tbody>
           </table>
         </div>
       </div>
-      <p className="note">Vs target = posiciones que se pueden ocupar hasta el target (positivo) o que sobran sobre el target (negativo). Gráfico en % de las posiciones de cada línea: la barra gris es su capacidad (100%), la de ocupadas va dentro y la línea roja es el target. Barras en amarillo = línea de rack sobre el target.</p>
+      <p className="note">Vs target = posiciones que se pueden ocupar hasta el target (positivo) o que sobran sobre el target (negativo). Gráfico en % de las posiciones de cada línea: la barra gris es su capacidad (100%), la de ocupadas va dentro y la línea roja es el target. Semáforo y color de las barras: verde bajo el target, amarillo a menos de {fmt(av * 100, 1)} puntos del target y rojo sobre el target (en la tabla, las luces amarilla y roja parpadean).</p>
     </div>
   );
 }

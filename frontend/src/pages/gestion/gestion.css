@@ -251,3 +251,21 @@
 .gd .sec,.gd .kpi{border-radius:12px;box-shadow:var(--sombra)}
 .gd .btn{border-radius:8px}
 .gd .btn.primary{color:#fff}
+/* semáforo de capacidad del OSR: luz por línea de rack, intermitente cerca y sobre el target */
+.gd .sem{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px;flex:none}
+.gd .sem-ok{background:var(--teal)}
+.gd .sem-cerca{background:var(--yellow);animation:sem-pulso 1.6s ease-in-out infinite}
+.gd .sem-sobre{background:var(--red);animation:sem-pulso .8s ease-in-out infinite}
+@keyframes sem-pulso{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.2;transform:scale(.8)}}
+.gd .semaforo{border:1px solid var(--line);border-left-width:5px;border-radius:10px;padding:10px 14px;margin:8px 0 12px;background:var(--panel)}
+.gd .sem-borde-ok{border-left-color:var(--teal)}
+.gd .sem-borde-cerca{border-left-color:var(--yellow)}
+.gd .sem-borde-sobre{border-left-color:var(--red)}
+/* la franja es la leyenda: luces fijas; el parpadeo queda en la tabla */
+.gd .semaforo .sem{animation:none}
+.gd .sem-luces{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:13px}
+.gd .sem-linea{display:inline-flex;align-items:center;gap:2px}
+.gd .sem-linea b{margin-left:4px}
+.gd .sem-total{padding-left:14px;border-left:1px solid var(--line)}
+.gd .sem-texto{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.gd .sem-cerca,.gd .sem-sobre{animation:none}}

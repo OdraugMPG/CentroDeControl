@@ -42,7 +42,11 @@ function parseCSV(text) {
 
 // Devuelve [{hoja, filas: [{ENCABEZADO_NORMALIZADO: valor}]}] para cada hoja que contenga las columnas requeridas
 export async function leerTablas(buffer, nombreArchivo, requeridas) {
-  const req = requeridas.map(normHeader);
+  return buscarTablas(await leerLibro(buffer, nombreArchivo), requeridas);
+}
+
+// Lee el libro una sola vez (para probar varios formatos con buscarTablas sin volver a leerlo)
+export async function leerLibro(buffer, nombreArchivo) {
   let hojas = [];
   if (/\.csv$/i.test(nombreArchivo)) {
     hojas = [{ nombre: 'csv', aoa: parseCSV(buffer.toString('utf8').replace(/^﻿/, '')) }];
@@ -58,6 +62,11 @@ export async function leerTablas(buffer, nombreArchivo, requeridas) {
       hojas.push({ nombre: ws.name, aoa: Array.from(aoa, r => r || []) });
     });
   }
+  return hojas;
+}
+
+export function buscarTablas(hojas, requeridas) {
+  const req = requeridas.map(normHeader);
   const out = [];
   for (const h of hojas) {
     const idx = h.aoa.slice(0, 30).findIndex(r => { const n = r.map(normHeader); return req.every(x => n.includes(x)); });

@@ -13,13 +13,17 @@ const LinkModelo = ({ tipo, texto = 'Descargar modelo' }) => <a href={modelo(tip
 
 const TIPOS = [
   ['pedidos', 'Flujo de pedidos', 'La misma extracción que hoy alimenta la tabla dinámica (Flujo de pedido.xlsx). Se detecta sola la fila de encabezados. Cada carga se compara con la anterior para calcular las unidades que salieron de cada etapa: cuanto más seguido se cargue, más preciso es el control por hora.'],
-  ['recepcion', 'Recepción', 'Citas del día con sus horas de llegada, descarga y unidades. Volver a cargar el mismo día actualiza las citas.'],
-  ['almacenamiento', 'Almacenamiento', 'Ocupación por zona, LPN por ubicar y reposiciones. Cada hoja es opcional.'],
+  ['almacenado', 'Almacenados', 'La extracción de almacenados del WMS (ALM_USER): una fila por LPN ubicado con QUANTITY, F_MOD, TURNO, ITEM_ID, TARGET_LOCATION_ID, USUARIO, CD, OPERACION… Se reemplazan los días que trae el archivo y se analiza en Operación, Recepción.', true],
+  ['recepcion', 'Recepción: citas', 'Citas del día con sus horas de llegada, descarga y unidades. Volver a cargar el mismo día actualiza las citas.'],
+  ['almacenamiento', 'Almacenamiento (pendiente y almacenados)', 'Se reconoce solo cuál archivo es. Pendiente por almacenar: la foto del WMS con una fila por iLPN (ILPN_ID, QTY, ZONA, ORIGEN, FECHA_CREAC, CD…); cada carga reemplaza la anterior. Almacenados (ALM_USER): una fila por LPN ubicado (QUANTITY, F_MOD, TURNO, USUARIO, CD, OPERACION…); se reemplazan los días que trae. Ambos se analizan en Operación, Almacenamiento.'],
+  ['pendiente', 'Pendiente por almacenar', '', true],
   ['olas', 'Simulador de olas', 'El reporte del simulador de olas (ESTADO, OD, SKU, QTY, FECHA_SALIDA, TIPO_PICKING…). Cada carga reemplaza a la anterior y se analiza en Operación, Simulador de olas.']
 ];
 
 const detalle = c => c.tipo === 'pedidos'
   ? `${N(c.resumen.unidades)} un. en flujo${c.resumen.primera ? ', primera carga (sin comparación)' : `, ${N(c.resumen.unidadesMovidas)} un. avanzaron de etapa`}`
+  : c.tipo === 'pendiente' ? `${N(c.resumen.unidades)} un. pendientes en ${N(c.resumen.ilpns)} iLPN, ${N(c.resumen.skus)} SKU`
+  : c.tipo === 'almacenado' ? `${N(c.resumen.unidades)} un. en ${N(c.resumen.lpns)} LPN, ${c.resumen.dias} días (${dmy(c.resumen.desde)} al ${dmy(c.resumen.hasta)})`
   : c.tipo === 'recepcion' ? `${c.resumen.citas} citas` : c.tipo === 'olas' ? `${N(c.resumen.unidades)} un., ${N(c.resumen.ods)} OD` : `${c.resumen.zonas || 0} zonas, ${c.resumen.lpns || 0} LPN, ${c.resumen.reposiciones || 0} reposiciones`;
 
 // Archivos de Gestión diaria y Continuidad: [id, título, ayuda, URL de carga, permisos, modelo, vista del módulo, resultado]
@@ -185,11 +189,11 @@ export default function Cargas() {
       {ops && <>
         <Grupo titulo="Operación (extracciones del WMS)" />
         <div className="grid">
-          {TIPOS.map(([tipo, titulo, ayuda]) => (
+          {TIPOS.filter(([, , , oculto]) => !oculto).map(([tipo, titulo, ayuda]) => (
             <section key={tipo} id={`carga-${tipo}`} className="card s6">
               <h3>{titulo}</h3><p className="hint">{ayuda}</p>
               <SubirArchivo onFile={f => subir(tipo, f)} disabled={!!subiendo} texto={subiendo === tipo ? 'Procesando…' : 'Elegir archivo'} />
-              <p className="hint" style={{ marginTop: 8 }}><LinkModelo tipo={tipo} /></p>
+              <p className="hint" style={{ marginTop: 8 }}>{tipo === 'almacenamiento' ? <><LinkModelo tipo="pendiente" texto="Modelo pendiente por almacenar" /> · <LinkModelo tipo="almacenado" texto="Modelo almacenados" /></> : <LinkModelo tipo={tipo} />}</p>
               {res[tipo] && <p className={`msg ${res[tipo].ok ? '' : 'err'}`} role="status">{res[tipo].t}</p>}
             </section>))}
         </div>

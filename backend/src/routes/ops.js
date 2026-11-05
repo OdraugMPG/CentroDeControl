@@ -12,6 +12,9 @@ import { importarPedidos } from '../import/pedidos.js';
 import { importarRecepcion } from '../import/recepcion.js';
 import { importarAlmacenamiento } from '../import/almacenamiento.js';
 import { importarOlas } from '../import/olas.js';
+import { importarAlmacenado } from '../import/almacenado.js';
+import { analisisAlmacenado } from '../services/almacenado.js';
+import { analisisPendiente } from '../services/pendiente.js';
 import { plantilla } from '../import/plantillas.js';
 import { modelo } from '../import/modelos.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
@@ -51,6 +54,19 @@ r.get('/turnos/dia', ah(async (req, res) => {
   res.json(turnosDelDia(f, c).map(t => { const i = instancia(f, t, c); return { fecha: f, turno: t, start: i.start, end: i.end }; }));
 }));
 
+// ---------- Recepción: lo almacenado ----------
+r.get('/recepcion/almacenado', ah(async (req, res) => {
+  const f = k => req.query[k] ? fecha(req.query[k], k) : null;
+  res.json(await analisisAlmacenado({ desde: f('desde'), hasta: f('hasta'), cd: texto(req.query.cd, 60), turno: texto(req.query.turno, 20), operacion: texto(req.query.operacion, 80) }));
+}));
+
+// Almacenamiento: lo pendiente por almacenar (f = filtros en JSON: { zona: [...], cd: [...] })
+r.get('/almacenamiento/pendiente', ah(async (req, res) => {
+  let f = {};
+  try { f = req.query.f ? JSON.parse(String(req.query.f)) : {}; } catch { throw bad('Filtros inválidos.'); }
+  res.json(await analisisPendiente(f && typeof f === 'object' ? f : {}));
+}));
+
 // ---------- Cierre de turno ----------
 r.get('/cierres', ah(async (req, res) => { res.json(await cierre.comparativoDia(fecha(req.query.fecha))); }));
 r.get('/cierres/recientes', ah(async (req, res) => { res.json(await cierre.recientes(Math.min(21, +req.query.n || 7))); }));
@@ -87,7 +103,7 @@ r.get('/cierres/pareto', ah(async (req, res) => {
 }));
 
 // ---------- Cargas de extracciones ----------
-const IMPORT = { pedidos: importarPedidos, recepcion: importarRecepcion, almacenamiento: importarAlmacenamiento, olas: importarOlas };
+const IMPORT = { pedidos: importarPedidos, recepcion: importarRecepcion, almacenamiento: importarAlmacenamiento, olas: importarOlas, almacenado: importarAlmacenado };
 r.get('/cargas', ah(async (req, res) => {
   const { rows } = await q('SELECT * FROM cargas ORDER BY id DESC LIMIT 60');
   res.json(rows);

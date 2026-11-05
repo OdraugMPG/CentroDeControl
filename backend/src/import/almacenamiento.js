@@ -1,16 +1,20 @@
 // Carga de almacenamiento: un libro con hasta tres hojas (Ocupacion, LPN, Reposiciones).
 // Se reconocen por sus columnas, no por el nombre de la hoja.
 import { tx } from '../db.js';
-import { leerTablas, txt, num, fechaHora } from './excel.js';
+import { leerLibro, buscarTablas, txt, num, fechaHora } from './excel.js';
+import { guardarAlmacenado, REQ_ALMACENADO } from './almacenado.js';
+import { guardarPendiente, REQ_PENDIENTE } from './pendiente.js';
 
 const ESTADOS_LPN = { 'POR UBICAR': 'Por ubicar', 'EN CURSO': 'En curso', 'UBICADO': 'Ubicado', 'PENDIENTE': 'Por ubicar', 'COMPLETADO': 'Ubicado' };
 
 export async function importarAlmacenamiento(buffer, archivo, { usuario = null } = {}) {
-  const [zonasT, lpnT, repoT] = await Promise.all([
-    leerTablas(buffer, archivo, ['ZONA', 'POSICIONES', 'OCUPADAS']),
-    leerTablas(buffer, archivo, ['LPN', 'ESTADO']),
-    leerTablas(buffer, archivo, ['ZONA', 'PENDIENTES'])
-  ]);
+  // las extracciones reales del WMS: pendiente por almacenar (ILPN_ID, QTY…) o almacenados (ALM_USER: QUANTITY, ITEM_ID, F_MOD…)
+  const hojas = await leerLibro(buffer, archivo);
+  const pend = buscarTablas(hojas, REQ_PENDIENTE);
+  if (pend.length) return guardarPendiente(pend[0].filas, archivo, usuario);
+  const alm = buscarTablas(hojas, REQ_ALMACENADO);
+  if (alm.length) return guardarAlmacenado(alm[0].filas, archivo, usuario);
+  const [zonasT, lpnT, repoT] = [['ZONA', 'POSICIONES', 'OCUPADAS'], ['LPN', 'ESTADO'], ['ZONA', 'PENDIENTES']].map(req => buscarTablas(hojas, req));
   const zonas = (zonasT[0]?.filas || []).map(r => ({ zona: txt(r.ZONA), posiciones: Math.round(num(r.POSICIONES)), ocupadas: Math.round(num(r.OCUPADAS)) }))
     .filter(z => z.zona && z.posiciones > 0);
   const lpns = (lpnT[0]?.filas || []).map(r => ({
@@ -21,7 +25,7 @@ export async function importarAlmacenamiento(buffer, archivo, { usuario = null }
   const repos = (repoT[0]?.filas || []).map(r => ({ zona: txt(r.ZONA), pendientes: Math.round(num(r.PENDIENTES)), urgentes: Math.round(num(r.URGENTES)) }))
     .filter(r => r.zona);
   if (!zonas.length && !lpns.length && !repos.length)
-    throw Object.assign(new Error('No encontré hojas de ocupación (ZONA, POSICIONES, OCUPADAS), LPN (LPN, ESTADO) ni reposiciones (ZONA, PENDIENTES). Usa la plantilla.'), { status: 400 });
+    throw Object.assign(new Error('No encontré columnas de pendientes por almacenar (ILPN_ID, QTY), de almacenados (QUANTITY, ITEM_ID), ni hojas de ocupación (ZONA, POSICIONES, OCUPADAS), LPN (LPN, ESTADO) ni reposiciones (ZONA, PENDIENTES). Usa la plantilla.'), { status: 400 });
 
   return tx(async c => {
     const { rows: [carga] } = await c.query(

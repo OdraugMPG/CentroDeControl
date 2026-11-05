@@ -13,13 +13,22 @@ function Apilada({ v }) {
   return (
     <div className="apil" role="img" aria-label={`A ${pc(v.A, tot)}, B ${pc(v.B, tot)}, C ${pc(v.C, tot)}`}>
       {['A', 'B', 'C'].map((a) => v[a] > 0 && (
-        <i key={a} className={TONO[a]} style={{ flexGrow: v[a] }} title={`Clase ${a}: ${fmt(v[a])} ubicaciones (${pc(v[a], tot)})`}>
-          {v[a] / tot >= 0.09 ? `${a} ${pc(v[a], tot, 0)}` : ''}
+        <i key={a} className={TONO[a]} style={{ flex: `${v[a]} 1 0`, minWidth: 34 }} title={`Clase ${a}: ${fmt(v[a])} ubicaciones (${pc(v[a], tot)})`}>
+          {pc(v[a], tot, 0)}
         </i>
       ))}
     </div>
   );
 }
+
+// Leyenda de los colores de la barra por clase
+const LEYENDA_ABC = [['A', 'Clase A: alta rotación'], ['B', 'Clase B: rotación media'], ['C', 'Clase C: baja rotación o sin venta']];
+const LeyendaAbc = () => (
+  <div className="row" style={{ gap: 14, margin: '2px 0 8px', fontSize: 12.5 }} aria-label="Leyenda de clases ABC">
+    {LEYENDA_ABC.map(([a, l]) => <span key={a} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <i className={TONO[a]} style={{ width: 14, height: 14, borderRadius: 3, display: 'inline-block' }} />{l}</span>)}
+  </div>
+);
 
 function Generar({ etiqueta, total, onGenerar }) {
   const [n, setN] = useState(Math.min(200, total) || 0);
@@ -449,6 +458,7 @@ export default function Optimizacion({ irA }) {
 
       <div className="sec">
         <h2>Cómo se reparten las clases en cada CD</h2>
+        <LeyendaAbc />
         <div className="tbl">
           <table>
             <thead><tr><th>CD</th><th className="num">Ubicaciones</th><th style={{ minWidth: 260 }}>Ubicaciones por clase ABC</th><th className="num">Unid. clase A</th><th className="num">Ubic. solo CZ</th><th className="num">SKU</th><th className="num">Unidades</th></tr></thead>
