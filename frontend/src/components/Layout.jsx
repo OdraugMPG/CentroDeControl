@@ -38,9 +38,14 @@ function Cuenta({ onClave }) {
     <details className="who cuenta" ref={ref}>
       <summary><b>{usuario.nombre}</b><span>{usuario.rolAcceso}</span></summary>
       <div className="pop">
-        <p className="muted" style={{ margin: '0 0 6px', fontSize: 13 }}>Usuario {usuario.usuario}{usuario.persona ? `, ${usuario.rol}${usuario.turno ? ` turno ${usuario.turno}` : ''}` : ''}</p>
+        <b className="pop-nombre">{usuario.nombre}</b>
+        <dl className="pop-datos">
+          <dt>Perfil</dt><dd><span className="pop-perfil">{usuario.rolAcceso}</span></dd>
+          <dt>Usuario</dt><dd>{usuario.usuario}</dd>
+          {usuario.persona && <><dt>Cargo</dt><dd>{usuario.rol}{usuario.turno ? `, turno ${usuario.turno}` : ''}</dd></>}
+        </dl>
         <button type="button" className="link" onClick={() => { ref.current.open = false; onClave(); }}>Cambiar contraseña</button>
-        <button type="button" className="link" onClick={salir}>Salir</button>
+        <button type="button" className="btn pop-salir" onClick={salir}>Cerrar sesión</button>
       </div>
     </details>
   );

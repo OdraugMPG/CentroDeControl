@@ -356,3 +356,14 @@ textarea.sum{min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospa
 .card,.pnl,.kpis{border-radius:12px;box-shadow:var(--sombra)}
 .ghost{border-radius:8px}
 input[type=text],input[type=number],input[type=date],input[type=search],select,textarea{background:var(--panel);border-radius:8px}
+/* menú de la cuenta sobre la barra azul: el desplegable vuelve a los colores normales */
+.appbar .cuenta summary span{color:rgba(255,255,255,.75)}
+.appbar .cuenta .pop{color:var(--ink);border-color:var(--line);border-radius:10px;min-width:240px;padding:12px 14px;gap:8px;justify-items:stretch}
+.appbar .cuenta .pop .pop-nombre{color:var(--ink);font-size:14.5px}
+.cuenta .pop-datos{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0;font-size:13px}
+.cuenta .pop-datos dt{color:var(--muted)}
+.cuenta .pop-datos dd{margin:0;color:var(--ink)}
+.cuenta .pop-perfil{display:inline-block;background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue);border-radius:999px;padding:1px 9px;font-weight:600;font-size:12.5px}
+.appbar .cuenta .pop button.link{color:var(--blue);justify-self:start;padding:2px 0}
+.appbar .cuenta .pop button.pop-salir{background:var(--red);color:#fff;border:0;border-radius:8px;padding:7px 12px;font-weight:600;cursor:pointer;margin-top:2px}
+.appbar .cuenta .pop button.pop-salir:hover{filter:brightness(.92)}
