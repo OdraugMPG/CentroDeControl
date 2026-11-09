@@ -1,7 +1,7 @@
 // Validación de la toma (Gestión de inventario): el resultado por pasada según la columna VALIDACION (primera, segunda
 // y tercera), en ubicaciones, SKU y unidades, por día de toma y CD; lo que requiere supervisor; cómo se resuelven las
 // diferencias de una pasada a la siguiente y el detalle por ubicación y SKU.
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCarga } from '../../lib/contexto.jsx';
 import { api } from '../../lib/api.js';
@@ -10,7 +10,8 @@ import Grafico from '../../components/Grafico.jsx';
 import { N, pctf, dmy, dm, css } from '../../lib/fmt.js';
 import { descargar } from './Inventario.jsx';
 
-const PASADA = { 1: ['Primera pasada', '--blue'], 2: ['Segunda pasada', '--slate'], 3: ['Tercera pasada', '--yellow'] };
+const PASADA = { 1: ['Primera pasada', '--blue'], 2: ['Segunda pasada', '--slate'], 3: ['Tercera pasada', '--yellow'],
+  4: ['Cuarta pasada', '--teal'], 5: ['Quinta pasada', '--teal'], 6: ['Sexta pasada', '--teal'] };
 const nombre = (n) => PASADA[n]?.[0] || `Pasada ${n}`;
 const color = (n) => PASADA[n]?.[1] || '--violet';
 const MEDIDAS = [['ubicaciones', 'Ubicaciones'], ['skus', 'SKU'], ['filas', 'Líneas (ubic. × SKU)'], ['unidCont', 'Unidades contadas'], ['abs', 'Unidades con diferencia']];
@@ -59,17 +60,57 @@ function Matriz({ titulo, c, b, fechas, cds, med }) {
   );
 }
 
+// Match: el mismo SKU falta en una ubicación y sobra en otra del mismo CD. Al netearlos baja la diferencia de inventario
+// (es mercadería mal ubicada, no una pérdida). Como la tabla dinámica: CD, SKU y ubicación con faltante y sobrante.
+function Match({ m, desde, hasta }) {
+  const porCd = [...new Set(m.lista.map((g) => g.cd))].map((cd) => ({ cd, gs: m.lista.filter((g) => g.cd === cd) }));
+  const suma = (gs, k) => gs.reduce((a, g) => a + g[k], 0);
+  const n0 = (v) => (v ? N(v) : '');
+  const csv = () => descargar([['CD', 'SKU', 'Ubicación', 'Fecha de toma', 'Faltante', 'Sobrante', 'Total general'],
+    ...m.lista.flatMap((g) => g.ubic.map((u) => [g.cd, g.sku, u.ubicacion, u.fecha, u.falt, u.sobr, u.falt + u.sobr]))], `match_sku_${desde}_${hasta}.csv`);
+  return (
+    <Card title="Match de faltantes y sobrantes (mismo SKU)" hint="El mismo SKU que falta en una ubicación y sobra en otra del mismo CD: al netearlos baja la diferencia de inventario. Con la diferencia final de cada ubicación (la última toma del rango)."
+      actions={m.skus > 0 && <button type="button" className="ghost" onClick={csv}>Descargar CSV</button>}>
+      {!m.skus ? <p className="empty">No hay SKU que falten en una ubicación y sobren en otra del mismo CD con estos filtros.</p> : <>
+        <div className="dash-match-k">
+          <div><b>{N(m.skus)}</b><span>SKU con match</span><small>{N(m.totales)} netean toda su diferencia</small></div>
+          <div><b>{N(m.neteo)}</b><span>Unidades que se netean</span><small>a mover entre ubicaciones</small></div>
+          <div><b>{pctf(div(m.absMatch, m.absTotal))}</b><span>Baja la diferencia absoluta</span><small>de {N(m.absTotal)} a {N(m.absTotal - m.absMatch)} unidades</small></div>
+        </div>
+        <div className="tscroll val-det" style={{ maxHeight: 460, overflow: 'auto', marginTop: 12 }}><table className="val-match">
+          <thead><tr><th>CD</th><th>SKU</th><th>Ubicación</th><th className="num">Faltante</th><th className="num">Sobrante</th><th className="num">Total general</th><th className="num">Netea</th><th className="num">Queda</th></tr></thead>
+          <tbody>{porCd.map(({ cd, gs }) => [
+            ...gs.flatMap((g) => [
+              ...g.ubic.map((u, i) => (
+                <tr key={`${cd}|${g.sku}|${u.ubicacion}`}><td>{i === 0 && g === gs[0] ? <b>{cd}</b> : ''}</td><td>{i === 0 ? <b>{g.sku}</b> : ''}</td>
+                  <td title={`Toma ${dmy(u.fecha)}`}>{u.ubicacion}</td><td className="num warn">{n0(u.falt)}</td><td className="num">{n0(u.sobr)}</td><td className="num">{N(u.falt + u.sobr)}</td><td /><td /></tr>)),
+              <tr key={`${cd}|${g.sku}|t`} className="val-m-sub"><td /><td colSpan={2}>Total {g.sku}</td><td className="num">{N(g.falt)}</td><td className="num">{N(g.sobr)}</td><td className="num">{N(g.falt + g.sobr)}</td>
+                <td className="num"><b>{N(g.neteo)}</b></td><td className="num"><b className={g.queda ? 'warn' : 'ok'}>{signo(g.queda)}</b></td></tr>]),
+            <tr key={`${cd}|t`} className="val-m-cd"><td colSpan={3}>Total {cd}</td><td className="num">{N(suma(gs, 'falt'))}</td><td className="num">{N(suma(gs, 'sobr'))}</td>
+              <td className="num">{N(suma(gs, 'falt') + suma(gs, 'sobr'))}</td><td className="num">{N(suma(gs, 'neteo'))}</td><td className="num">{signo(suma(gs, 'queda'))}</td></tr>])}</tbody>
+        </table></div>
+        <p className="hint">Netea: las unidades que se compensan (el menor entre faltante y sobrante). Queda: la diferencia del SKU después de netear (negativo = sigue faltando).</p>
+      </>}
+    </Card>
+  );
+}
+
 export default function InventarioValidacion() {
-  const [filtro, setFiltro] = useState({ desde: '', hasta: '', cd: '', turno: '', empresa: '' });
+  const [filtro, setFiltro] = useState({ desde: '', hasta: '', cd: '', zona: '', turno: '', empresa: '' });
   const [med, setMed] = useState('ubicaciones');
   const [verDet, setVerDet] = useState('todo');
-  const d = useCarga(() => api.get(`/continuidad/inventario/validacion?${new URLSearchParams(filtro)}`), [filtro]);
+  const [busca, setBusca] = useState('');
+  const [buscar, setBuscar] = useState('');
+  // la vista del detalle y la búsqueda se filtran en el servidor, así no se corta ninguna línea por el límite
+  const d = useCarga(() => api.get(`/continuidad/inventario/validacion?${new URLSearchParams({ ...filtro, ver: verDet, buscar })}`), [filtro, verDet, buscar]);
   const r = d.data;
-  const detalle = useMemo(() => (r?.detalle || []).filter((x) => verDet === 'todo' || (verDet === 'dif' ? !x.ok : verDet === 'ok' ? x.ok && x.pasadas > 1 : x.sup)), [r, verDet]);
+  const detalle = r?.detalle || [];
   if (!r) return <><PageHead title="Validación de la toma" /><Cargando error={d.error} /></>;
   const set = (k) => (e) => setFiltro({ ...filtro, desde: filtro.desde || r.desde, hasta: filtro.hasta || r.hasta, [k]: e.target.value });
   const medN = MEDIDAS.find((m) => m[0] === med)[1];
   const P = r.pasadas, E = r.embudo;
+  const cols = Array.from({ length: r.maxPasada || 3 }, (_, i) => i + 1);
+  const ct = r.cuenta || {};
 
   const porDia = {
     labels: r.fechas.map(dm),
@@ -80,8 +121,8 @@ export default function InventarioValidacion() {
     datasets: [{ label: 'Líneas', data: [E.lineas, E.dif1, E.a2, E.ok2, E.a3, E.ok3, E.finalDif],
       backgroundColor: ['--blue', '--red', '--slate', '--teal', '--yellow', '--teal', '--red'].map(css), borderRadius: 4, borderSkipped: false, maxBarThickness: 22 }]
   };
-  const csv = () => descargar([['Fecha', 'CD', 'Ubicación', 'SKU', 'Sistema', '1ª pasada', '2ª pasada', '3ª pasada', 'Pasadas', 'Diferencia final', 'Resultado', 'Requiere supervisor', 'Turno', 'Usuarios'],
-    ...detalle.map((x) => [x.fecha, x.cd, x.ubicacion, x.sku, x.sistema, x.c1 ?? '', x.c2 ?? '', x.c3 ?? '', x.pasadas, x.dif, x.estado, x.sup ? 'SI' : 'NO', x.turno, x.usuario])], `validacion_toma_${r.desde}_${r.hasta}.csv`);
+  const csv = () => descargar([['Fecha', 'CD', 'Ubicación', 'SKU', 'Sistema', ...cols.map((n) => `${n}ª pasada`), 'Pasadas', 'Diferencia final', 'Resultado', 'Requiere supervisor', 'Turno', 'Usuarios'],
+    ...detalle.map((x) => [x.fecha, x.cd, x.ubicacion, x.sku, x.sistema, ...cols.map((n) => x.c[n] ?? ''), x.pasadas, x.dif, x.estado, x.sup ? 'SI' : 'NO', x.turno, x.usuario])], `validacion_toma_${r.desde}_${r.hasta}.csv`);
   const pc = (x, n) => (x === null ? <span className="muted">—</span> : <span className={x !== n ? 'warn' : ''}>{N(x)}</span>);
 
   return (
@@ -93,14 +134,16 @@ export default function InventarioValidacion() {
         <label className="field" style={{ width: 'auto' }}><span>Toma desde</span><input type="date" value={filtro.desde || r.desde || ''} onChange={set('desde')} /></label>
         <label className="field" style={{ width: 'auto' }}><span>Hasta</span><input type="date" value={filtro.hasta || r.hasta || ''} onChange={set('hasta')} /></label>
         <label className="field" style={{ width: 'auto' }}><span>CD</span><select value={filtro.cd} onChange={set('cd')}><option value="">Todos</option>{r.cds.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <label className="field" style={{ width: 'auto' }}><span>Zona</span><select value={filtro.zona} onChange={set('zona')} title="Las 3 primeras letras de la ubicación">
+          <option value="">Todas</option>{(r.zonas || []).map((z) => <option key={z}>{z}</option>)}{filtro.zona && !(r.zonas || []).includes(filtro.zona) && <option>{filtro.zona}</option>}</select></label>
         <label className="field" style={{ width: 'auto' }}><span>Turno</span><select value={filtro.turno} onChange={set('turno')}><option value="">Todos</option>{r.turnos.map((c) => <option key={c}>{c}</option>)}</select></label>
         <label className="field" style={{ width: 'auto' }}><span>Empresa</span><select value={filtro.empresa} onChange={set('empresa')}><option value="">Todas</option>{r.empresas.map((c) => <option key={c}>{c}</option>)}</select></label>
-        {(filtro.desde || filtro.cd || filtro.turno || filtro.empresa) && <button type="button" className="ghost" onClick={() => setFiltro({ desde: '', hasta: '', cd: '', turno: '', empresa: '' })}>Quitar filtros</button>}
+        {(filtro.desde || filtro.cd || filtro.zona || filtro.turno || filtro.empresa) && <button type="button" className="ghost" onClick={() => setFiltro({ desde: '', hasta: '', cd: '', zona: '', turno: '', empresa: '' })}>Quitar filtros</button>}
       </div>
 
       {!P.length ? <p className="empty">Sin tomas entre el {dmy(r.desde)} y el {dmy(r.hasta)} con estos filtros.</p> : <>
         <div className="val-tarjetas">
-          {[1, 2, 3].map((n) => { const p = P.find((x) => x.conteo === n); return <Tarjeta key={n} titulo={nombre(n)} c={color(n)} x={p?.tot} />; })}
+          {[...new Set([1, 2, 3, ...P.map((p) => p.conteo)])].map((n) => { const p = P.find((x) => x.conteo === n); return <Tarjeta key={n} titulo={nombre(n)} c={color(n)} x={p?.tot} />; })}
           <Tarjeta titulo="Requiere supervisor" c="--violet" x={r.sup.tot.filas ? r.sup.tot : null} nota="Registros con REQUIERE_SUPERVISOR = SI." />
         </div>
 
@@ -123,16 +166,21 @@ export default function InventarioValidacion() {
           </div>
         </Card>
 
-        <Card title="Detalle por ubicación y SKU" hint={`Lo que dio cada pasada; en rojo, el conteo que no coincide con el sistema. ${N(r.totalDetalle)} líneas con más de una pasada o con diferencia${r.totalDetalle > r.detalle.length ? ` (se muestran ${N(r.detalle.length)}; el CSV trae las que se ven)` : ''}.`}
+        {r.match && <Match m={r.match} desde={r.desde} hasta={r.hasta} />}
+
+        <Card title="Detalle por ubicación y SKU" hint={`Todas las líneas del archivo (ubicación y SKU por día) con lo que dio cada pasada; en rojo, el conteo que no coincide con el sistema. ${N(r.totalDetalle)} líneas${buscar ? ` con «${buscar}»` : ''}${r.totalDetalle > r.detalle.length ? ` (el CSV trae las primeras ${N(r.detalle.length)}; usa los filtros o la búsqueda para acotar)` : ''}.`}
           actions={<div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <Seg label="Ver" valor={verDet} onChange={setVerDet} opciones={[['todo', 'Todo'], ['dif', 'Siguen con diferencia'], ['ok', 'Cuadraron al re-contar'], ['sup', 'Requieren supervisor']]} />
+            <input type="search" aria-label="Buscar ubicación o SKU" placeholder="Ubicación o SKU (Enter)" value={busca} style={{ width: 200 }}
+              onChange={(e) => { setBusca(e.target.value); if (!e.target.value) setBuscar(''); }} onKeyDown={(e) => e.key === 'Enter' && setBuscar(busca.trim())} onBlur={() => setBuscar(busca.trim())} />
+            <Seg label="Ver" valor={verDet} onChange={setVerDet} opciones={[['todo', 'Todo'], ['dif', 'Siguen con diferencia'], ['ok', 'Cuadraron al re-contar'], ['ok1', 'Cuadraron en la 1ª'], ['sup', 'Requieren supervisor']]
+              .map(([v, t]) => [v, ct[v] !== undefined ? `${t} (${N(ct[v])})` : t])} />
             <button type="button" className="ghost" onClick={csv} disabled={!detalle.length}>Descargar CSV</button></div>}>
-          {detalle.length ? <div className="tscroll" style={{ maxHeight: 520, overflow: 'auto' }}><table>
-            <thead><tr><th>Fecha</th><th>CD</th><th>Ubicación</th><th>SKU</th><th className="num">Sistema</th><th className="num">1ª</th><th className="num">2ª</th><th className="num">3ª</th><th className="num">Dif. final</th><th>Resultado</th><th>Turno</th><th>Usuarios</th></tr></thead>
+          {detalle.length ? <div className="tscroll val-det" style={{ maxHeight: 520, overflow: 'auto' }}><table>
+            <thead><tr><th>Fecha</th><th>CD</th><th>Ubicación</th><th>SKU</th><th className="num">Sistema</th>{cols.map((n) => <th key={n} className="num">{n}ª</th>)}<th className="num">Dif. final</th><th>Resultado</th><th>Turno</th><th>Usuarios</th></tr></thead>
             <tbody>{detalle.slice(0, 500).map((x) => (
               <tr key={`${x.fecha}|${x.cd}|${x.ubicacion}|${x.sku}`}>
                 <td>{dm(x.fecha)}</td><td>{x.cd}</td><td>{x.ubicacion}</td><td>{x.sku}</td><td className="num">{N(x.sistema)}</td>
-                <td className="num">{pc(x.c1, x.sistema)}</td><td className="num">{pc(x.c2, x.sistema)}</td><td className="num">{pc(x.c3, x.sistema)}</td>
+                {cols.map((n) => <td key={n} className="num">{pc(x.c[n] ?? null, x.sistema)}</td>)}
                 <td className="num"><b className={x.dif ? 'warn' : 'ok'}>{signo(x.dif)}</b></td>
                 <td><span className={`st ${x.ok ? 'cerrada' : x.pasadas > 1 ? 'vencida' : 'abierta'}`}>{x.estado}</span>{x.sup && <span className="pill" style={{ marginLeft: 6 }}>Supervisor</span>}</td>
                 <td>{x.turno || '—'}</td><td style={{ fontSize: 12 }}>{x.usuario || '—'}</td></tr>))}</tbody>

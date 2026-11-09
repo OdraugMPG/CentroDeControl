@@ -493,3 +493,8 @@ input[type=text],input[type=number],input[type=date],input[type=search],select,t
 .val-mtx{border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .val-mtx-h{background:var(--c);color:#fff;font-weight:700;font-size:13px;padding:6px 10px}
 .val-mtx table{font-size:13px}.val-mtx tfoot th{border-top:2px solid var(--line)}
+.val-match td{padding-top:5px;padding-bottom:5px}
+.val-match .val-m-sub td{background:color-mix(in srgb,var(--blue) 8%,var(--panel));font-weight:600;border-bottom:1px solid var(--line)}
+.val-match .val-m-cd td{background:color-mix(in srgb,var(--blue) 18%,var(--panel));font-weight:700;border-bottom:2px solid var(--ink)}
+/* detalle de la validación: encabezado fino y fijo al hacer scroll */
+.val-det thead th{position:sticky;top:0;z-index:2;background:var(--panel);padding-top:5px;padding-bottom:5px;font-size:12px;line-height:1.2;box-shadow:inset 0 -2px 0 var(--ink);border-bottom:0}

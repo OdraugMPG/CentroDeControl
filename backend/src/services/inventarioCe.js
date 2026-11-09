@@ -15,6 +15,7 @@ import { resolverCds, avanceDesdeResultado, SIN_CD } from './inventarioTurnos.js
 import { aplicarAjustes } from './inventarioCalendario.js';
 
 const LOTE = 5000;
+const REPROG_MAX_ANTES = 31;   // días
 const DIAS = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
 const diaSem = (iso) => new Date(`${iso}T12:00:00`).getDay();
 const up = (v) => (txt(v) || '').toUpperCase();
@@ -47,7 +48,8 @@ const campo = (fila, ...claves) => {
   return null;
 };
 
-export async function importarInventario(hojas, archivo) {
+/** todo: la programación del archivo es la base definitiva y reemplaza toda la programación cargada (no solo su rango) */
+export async function importarInventario(hojas, archivo, { todo = false } = {}) {
   const res = buscarTablas(hojas, ['UBICACION', 'CONTADO', 'SISTEMA']);
   if (res.length) {
     const r = await guardarResultado(res.flatMap((t) => t.filas), archivo);
@@ -58,7 +60,7 @@ export async function importarInventario(hojas, archivo) {
   }
   const prog = buscarTablas(hojas, ['UBICACION', 'ZONA', 'PASILLO']).filter((t) => t.filas.some((f) => Object.keys(f).some((k) => k.startsWith('FECHA_PR'))));
   if (prog.length) {
-    const r = await guardarPrograma(prog.flatMap((t) => t.filas), archivo);
+    const r = await guardarPrograma(prog.flatMap((t) => t.filas), archivo, todo);
     // CD de la operación (Loc es el código del centro): desde la Base, para las próximas semanas (el resto se completa al consultar)
     const h = fechaOperativa(Date.now(), await cat());
     await resolverCds({ desde: addDias(h, -30), hasta: addDias(h, 60) }).catch(() => null);
@@ -67,16 +69,18 @@ export async function importarInventario(hojas, archivo) {
   throw Object.assign(new Error('No reconocí el archivo. La programación de CE debe tener Loc, Ubicación, Zona, Pasillo y Fecha programada; el resultado de la toma, UBICACION, CD, SKU, CONTADO y SISTEMA.'), { status: 400 });
 }
 
-async function guardarPrograma(crudas, archivo) {
+async function guardarPrograma(crudas, archivo, todo = false) {
   const { diasAntes } = await paramsInv();
   const filas = [];
-  let sinFecha = 0;
+  let sinFecha = 0, reprogAntigua = 0;
   for (const r of crudas) {
     const cd = up(campo(r, 'LOC', 'CD')), ubic = up(campo(r, 'UBICACION'));
     if (!cd || !ubic) continue;
     const prog = soloFecha(campo(r, 'FECHA_PROGRAMADA', 'FECHA_PR'));
     if (!prog) { sinFecha++; continue; }
-    const reprog = soloFecha(campo(r, 'RE_PROGRAMACION', 'REPROGRAMACION', 'RE_PROG', 'REPROG'));
+    let reprog = soloFecha(campo(r, 'RE_PROGRAMACION', 'REPROGRAMACION', 'RE_PROG', 'REPROG'));
+    // una re-programación más de un mes antes de la fecha programada es la toma del ciclo anterior, no una nueva fecha
+    if (reprog && reprog < addDias(prog, -REPROG_MAX_ANTES)) { reprog = null; reprogAntigua++; }
     const ce = reprog || prog;
     filas.push({ cd, ubicacion: ubic, seteo: txt(campo(r, 'SETEO')), zona: up(campo(r, 'ZONA')), pasillo: up(campo(r, 'PASILLO')),
       seccion: txt(campo(r, 'SECCION')), vuelta: txt(campo(r, 'VUELTA')), lado: txt(campo(r, 'LADO')),
@@ -85,12 +89,14 @@ async function guardarPrograma(crudas, archivo) {
   }
   if (!filas.length) throw Object.assign(new Error('El archivo no trae filas con Loc, Ubicación y Fecha programada.'), { status: 400 });
   const fechas = [...new Set(filas.map((f) => f.fecha_prog))].sort();
+  const [pDesde, pHasta] = [fechas[0], fechas[fechas.length - 1]];
   const COLS = ['cd', 'ubicacion', 'seteo', 'zona', 'pasillo', 'seccion', 'vuelta', 'lado', 'fecha_prog', 'fecha_reprog', 'fecha_ce', 'fecha_op', 'fecha_toma', 'mes_prog', 'mes_toma'];
   const TIPO = { fecha_prog: 'date', fecha_reprog: 'date', fecha_ce: 'date', fecha_op: 'date', fecha_toma: 'date' };
   let reemplazadas = 0, ajustadas = 0;
   await tx(async (c) => {
-    // cada carga reemplaza las fechas programadas que trae (las asignaciones van aparte y se conservan)
-    reemplazadas = (await c.query('DELETE FROM inv_programa WHERE fecha_prog = ANY($1::date[])', [fechas])).rowCount;
+    // cada carga reemplaza todo el rango de fechas programadas que cubre (las asignaciones van aparte y se conservan)
+    reemplazadas = (todo ? await c.query('DELETE FROM inv_programa')
+      : await c.query('DELETE FROM inv_programa WHERE fecha_prog BETWEEN $1 AND $2', [pDesde, pHasta])).rowCount;
     const sql = `INSERT INTO inv_programa (${COLS.join(', ')}, archivo) SELECT *, $${COLS.length + 1} FROM unnest(${COLS.map((k, i) => `$${i + 1}::${TIPO[k] || 'text'}[]`).join(', ')})`;
     for (let i = 0; i < filas.length; i += LOTE) {
       const lote = filas.slice(i, i + LOTE);
@@ -104,7 +110,7 @@ async function guardarPrograma(crudas, archivo) {
     ajustadas = await aplicarAjustes(c, fechas);
   });
   const ops = filas.map((f) => f.fecha_op).sort();
-  return { filas: filas.length, sinFecha, reemplazadas, desde: fechas[0], hasta: fechas[fechas.length - 1], opDesde: ops[0], opHasta: ops[ops.length - 1], reprogramadas: filas.filter((f) => f.fecha_reprog).length, ajustadas };
+  return { filas: filas.length, sinFecha, reprogAntigua, reemplazadas, todo, desde: pDesde, hasta: pHasta, opDesde: ops[0], opHasta: ops[ops.length - 1], reprogramadas: filas.filter((f) => f.fecha_reprog).length, ajustadas };
 }
 
 async function guardarResultado(crudas, archivo) {
@@ -159,7 +165,8 @@ const ULTIMO = `(upper(coalesce(ultimo_registro, '')) IN ('SI', 'S', '1', 'TRUE'
 /** Número de conteo desde VALIDACION: PRIMERA = 1, SEGUNDA = 2, TERCERA = 3 */
 export function conteoDe(v) {
   const s = up(v);
-  return /^(SEG|2)/.test(s) ? 2 : /^(TER|3)/.test(s) ? 3 : /^\d+/.test(s) ? Math.min(9, parseInt(s, 10)) : 1;
+  const n = ['PRI', 'SEG', 'TER', 'CUA', 'QUI', 'SEX', 'SEP', 'OCT', 'NOV'].findIndex((p) => s.startsWith(p));
+  return n >= 0 ? n + 1 : /^\d+/.test(s) ? Math.min(9, parseInt(s, 10)) : 1;
 }
 /** CTE "fin": el resultado final de cada ubicación y SKU. Por día, el conteo más alto (luego ULTIMO_REGISTRO y F_MOD);
  *  y si dentro de 7 días hay un conteo posterior de la misma ubicación y SKU (re-conteo otro día), vale ese. */

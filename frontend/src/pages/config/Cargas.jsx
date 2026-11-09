@@ -55,10 +55,10 @@ const ARCHIVOS = {
       r => `${N(r.skus)} SKU, ${N(r.unidades)} unidades.`],
   ],
   continuidad: [
-    ['inventario', 'Inventario: programación de CE y resultado de la toma', 'Se reconoce solo cuál archivo es. Programación de Control de Existencia (Loc, Ubicación, Zona, Pasillo, Fecha programada, Re-Programación…): se reemplazan las fechas programadas que trae, sin perder las asignaciones. Resultado de la toma (UBICACION, CD, SKU, CONTADO, SISTEMA, FECHA…): se reemplazan los días que trae.',
+    ['inventario', 'Inventario: programación de CE y resultado de la toma', 'Se reconoce solo cuál archivo es. Programación de Control de Existencia (Loc, Ubicación, Zona, Pasillo, Fecha programada, Re-Programación…): se reemplaza todo el rango de fechas programadas que cubre el archivo (del primer al último día), sin perder las asignaciones. Una Re-Programación más de un mes antes de la fecha programada es la toma anterior y no cambia la fecha. Resultado de la toma (UBICACION, CD, SKU, CONTADO, SISTEMA, FECHA…): se reemplazan los días que trae.',
       '/continuidad/inventario/importar', ['co.inventario.cargar'], [['inventario', 'Modelo programación CE'], ['inventario_resultado', 'Modelo resultado de la toma']], ['/inventario', 'Inventario CD'],
       r => (r.tipo === 'programa'
-        ? `Programación: ${N(r.filas)} ubicaciones, fechas CE del ${dmy(r.desde)} al ${dmy(r.hasta)} (operación del ${dmy(r.opDesde)} al ${dmy(r.opHasta)})${r.reprogramadas ? `, ${N(r.reprogramadas)} re-programadas` : ''}${r.sinFecha ? `. ${N(r.sinFecha)} filas sin fecha programada se omitieron` : ''}.`
+        ? `Programación: ${N(r.filas)} ubicaciones, fechas CE del ${dmy(r.desde)} al ${dmy(r.hasta)} (operación del ${dmy(r.opDesde)} al ${dmy(r.opHasta)})${r.reprogramadas ? `, ${N(r.reprogramadas)} re-programadas` : ''}${r.reprogAntigua ? `. ${N(r.reprogAntigua)} con Re-Programación de un ciclo anterior quedaron en su fecha programada` : ''}${r.reemplazadas ? `. Se reemplazaron ${N(r.reemplazadas)} ubicaciones que había${r.todo ? ' (toda la programación anterior)' : ' en ese rango'}` : ''}${r.sinFecha ? `. ${N(r.sinFecha)} filas sin fecha programada se omitieron` : ''}.`
         : `Resultado de la toma: ${N(r.filas)} líneas en ${N(r.ubicaciones)} ubicaciones, del ${dmy(r.desde)} al ${dmy(r.hasta)}.`)],
   ],
 };
@@ -74,6 +74,7 @@ function CargaArchivo({ id, titulo, ayuda, url, modeloTipo, ir, mensaje, campo }
     const fd = new FormData(); fd.append('archivo', f);
     if (campo && valor) fd.append(campo, valor);
     if (campo === 'evento' && anterior) fd.append('anterior', '1');
+    if (id === 'inventario' && anterior) fd.append('reemplazar', 'todo');
     try { const r = await api.post(url, fd); setRes({ ok: true, t: `${f.name}: ${mensaje(r)}` }); } catch (e) { setRes({ ok: false, t: e.message }); }
     setSubiendo(false);
   };
@@ -85,6 +86,9 @@ function CargaArchivo({ id, titulo, ayuda, url, modeloTipo, ir, mensaje, campo }
       {campo === 'evento' && <label className="hint" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
         <input type="checkbox" checked={anterior} onChange={e => setAnterior(e.target.checked)} />
         Es una versión anterior: solo se guarda para comparar y no reemplaza la proyección activa</label>}
+      {id === 'inventario' && <label className="hint" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+        <input type="checkbox" checked={anterior} onChange={e => setAnterior(e.target.checked)} />
+        Programación definitiva: reemplaza toda la programación de CE cargada, no solo las fechas del archivo (las asignaciones y los resultados se conservan)</label>}
       <SubirArchivo onFile={subir} disabled={subiendo} texto={subiendo ? 'Procesando…' : 'Elegir archivo'} />
       <p className="hint" style={{ marginTop: 8 }}>{Array.isArray(modeloTipo) ? modeloTipo.map(([t, l]) => <span key={t}><LinkModelo tipo={t} texto={l} /> · </span>) : <><LinkModelo tipo={modeloTipo} /> · </>}<Link to={ir[0]}>Ir a {ir[1]}</Link></p>
       {res && <p className={`msg ${res.ok ? '' : 'err'}`} role="status">{res.t}</p>}

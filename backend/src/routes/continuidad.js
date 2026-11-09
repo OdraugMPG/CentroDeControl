@@ -231,7 +231,7 @@ r.get('/inventario', ah(async (req, res) => {
 // Programación de Control de Existencia y resultado de la toma (se reconoce solo cuál archivo es)
 r.post('/inventario/importar', upload.single('archivo'), ah(async (req, res) => {
   if (!req.file) throw bad('Adjunta el archivo.');
-  res.status(201).json(await importarInventario(await leerLibro(req.file.buffer, req.file.originalname), req.file.originalname));
+  res.status(201).json(await importarInventario(await leerLibro(req.file.buffer, req.file.originalname), req.file.originalname, { todo: req.body?.reemplazar === 'todo' }));
 }));
 r.get('/inventario/analisis', ah(async (req, res) => { res.json(await analisisInventario(req.query)); }));
 // dashboard: SKU y unidades, ERI / ERU histórico por CD, resultado neto y absoluto, top de SKU y matriz ABC / XYZ
