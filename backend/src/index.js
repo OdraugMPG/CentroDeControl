@@ -1,6 +1,7 @@
 import './env.js';
 import express from 'express';
 import { pool } from './db.js';
+import { aplicarRotacion } from './services/personal.js';
 import { seed } from './seed.js';
 import { autoTraspaso } from './services/continuidad.js';
 import ops from './routes/ops.js';
@@ -53,7 +54,8 @@ app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 app.use((err, req, res, next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 500);
   if (status >= 500) console.error(err);
-  res.status(status).json({ error: status >= 500 ? 'Error interno del servidor' : err.message });
+  const msg = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo supera el tamaño máximo permitido. Guárdalo como .xlsx (o .csv) solo con la hoja de datos e inténtalo de nuevo.' : err.message;
+  res.status(status).json({ error: status >= 500 ? 'Error interno del servidor' : msg });
 });
 
 const port = +process.env.PORT || 3000;
@@ -61,7 +63,11 @@ seed()   // aplica migraciones pendientes y catálogos base
   .then(() => {
     app.listen(port, () => console.log(`API del centro de control en http://localhost:${port}/api (zona ${process.env.TZ}, CORS: ${origenes.join(', ')})`));
     // Traspaso automático de tareas pendientes cada 5 minutos
-    const tick = () => autoTraspaso().catch(e => console.error('Traspaso automático:', e.message));
+    // y rotación semanal de turnos del personal (supervisores Paris y empresas externas)
+    const tick = () => {
+      autoTraspaso().catch(e => console.error('Traspaso automático:', e.message));
+      aplicarRotacion().catch(e => console.error('Rotación de turnos:', e.message));
+    };
     tick(); setInterval(tick, 5 * 60 * 1000);
   })
   .catch(e => { console.error('No se pudo preparar la base de datos:', e.message); process.exit(1); });

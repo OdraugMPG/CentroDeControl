@@ -4,26 +4,24 @@ import Grafico from '../../components/Grafico.jsx';
 import { N, pctf, sum, css, hhmm, fmtAge, minsDesde } from '../../lib/fmt.js';
 import { mAlmacen } from '../../lib/ops.jsx';
 import { useState } from 'react';
-import Recepcion from './Recepcion.jsx';
 import Pendiente from './Pendiente.jsx';
 
-const VISTAS = [['pend', 'Pendiente por almacenar'], ['alm', 'Almacenado'], ['ocup', 'Ocupación (plantilla)']];
+const VISTAS = [['pend', 'Pendiente por almacenar'], ['ocup', 'Ocupación (plantilla)']];
 const CLAVE = 'vistaAlmacenamiento';
 
-// Pendiente por almacenar (foto del WMS) y lo almacenado (ALM_USER); la ocupación por zona solo si se cargó esa plantilla
+// Por almacenar: lo pendiente (foto del WMS) y la ocupación por zona solo si se cargó esa plantilla. Lo almacenado (ALM_USER) está en Almacenado.
 export default function Almacenamiento() {
   const { snap } = useApp();
   const [vista, setVista] = useState(() => { try { return localStorage.getItem(CLAVE) || 'pend'; } catch { return 'pend'; } });
   const vistas = VISTAS.filter(([k]) => k !== 'ocup' || snap?.cargas?.almacenamiento);
   const v = vistas.some(([k]) => k === vista) ? vista : 'pend';
   const elegir = (k) => { setVista(k); try { localStorage.setItem(CLAVE, k); } catch { /* sin almacenamiento */ } };
-  const tabs = (
-    <div className="row" role="tablist" aria-label="Vistas de almacenamiento" style={{ gap: 6 }}>
+  const tabs = vistas.length > 1 && (
+    <div className="row" role="tablist" aria-label="Vistas de por almacenar" style={{ gap: 6 }}>
       {vistas.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={v === k} className={v === k ? 'btn' : 'ghost'} onClick={() => elegir(k)}>{l}</button>)}
     </div>
   );
   if (v === 'pend') return <Pendiente extra={tabs} />;
-  if (v === 'alm') return <Recepcion titulo="Almacenamiento" extra={tabs} />;
   return <Ocupacion extra={tabs} />;
 }
 
@@ -40,7 +38,7 @@ function Ocupacion({ extra }) {
 
   return (
     <>
-      <PageHead title="Almacenamiento" sub={snap.cargas.almacenamiento ? `Última carga a las ${hhmm(snap.cargas.almacenamiento.corte)}` : 'Sin cargas de almacenamiento'}>{extra}</PageHead>
+      <PageHead title="Por almacenar" sub={snap.cargas.almacenamiento ? `Última carga a las ${hhmm(snap.cargas.almacenamiento.corte)}` : 'Sin cargas de almacenamiento'}>{extra}</PageHead>
       <Kpis items={[
         ['Ocupación total', pctf(A.util), A.util > umbral ? 'warn' : ''],
         [`Zonas sobre ${pctf(umbral)}`, A.zonas.filter(z => z.u > umbral).length, A.zonas.some(z => z.u > umbral) ? 'warn' : ''],

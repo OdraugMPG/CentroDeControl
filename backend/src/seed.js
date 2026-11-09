@@ -45,7 +45,10 @@ export const PARAMETROS = {
   minAnden: 60,              // minutos de descarga
   minUbicar: 90,             // minutos de un LPN sin ubicar
   minConfirmacion: 30,       // minutos máximos para confirmar la recepción de un turno
-  minAntesCierre: 30         // un turno se puede cerrar desde estos minutos antes de su término
+  minAntesCierre: 30,        // un turno se puede cerrar desde estos minutos antes de su término
+  invDiasAntes: 2,           // inventario: días hábiles (lunes a sábado) que la operación pasa antes que Control de Existencia
+  eriSano: 0.98, eriCritico: 0.95,   // semáforo ERI: verde desde sano, rojo bajo crítico, amarillo entre ambos
+  eruSano: 0.99, eruCritico: 0.97    // semáforo ERU
 };
 
 export async function seed() {

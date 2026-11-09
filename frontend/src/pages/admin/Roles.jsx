@@ -72,7 +72,7 @@ export default function Roles() {
           onGuardar={guardarRol} onCancelar={() => setEditar(null)} onEliminar={() => eliminar(editar)} />
       </Card>}
       <Card>
-        <div className="tscroll"><table className="matriz">
+        <div className="tscroll matriz-scroll"><table className="matriz">
           <thead><tr><th>Vista o acción</th>{roles.map(x => (
             <th key={x.id} className="c" title={x.descripcion}>
               {x.sistema ? x.nombre : <button type="button" className="link" onClick={() => setEditar(x)}>{x.nombre}</button>}
@@ -84,7 +84,7 @@ export default function Roles() {
                 const n = g.items.filter(i => mat[x.id]?.has(i.clave)).length;
                 return <td key={x.id} className="c">{x.sistema ? '' : <button type="button" className="link" onClick={() => grupo(x.id, g.items, n < g.items.length)}>{n < g.items.length ? 'Todas' : 'Ninguna'}</button>}</td>;
               })}</tr>
-              {g.items.map(i => <tr key={i.clave}><td>{i.nombre}</td>{roles.map(x => (
+              {g.items.map(i => <tr key={i.clave}><td style={i.clave.split('.').length > 2 ? { paddingLeft: 26 } : undefined}>{i.nombre}</td>{roles.map(x => (
                 <td key={x.id} className="c"><input type="checkbox" aria-label={`${i.nombre}: ${x.nombre}`} disabled={x.sistema}
                   checked={x.sistema || !!mat[x.id]?.has(i.clave)} onChange={() => toggle(x.id, i.clave)} /></td>))}</tr>)}
             </tbody>))}

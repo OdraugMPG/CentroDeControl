@@ -13,15 +13,62 @@ const MOTIVO = { 'FALTA EN OSR': ['Falta en OSR', '--red'], 'BAJO EL MINIMO EN O
 const Pill = ({ m }) => { const [t, c] = MOTIVO[m] || [m, '--muted']; return <span className="pill" style={{ background: `color-mix(in srgb,var(${c}) 22%,transparent)` }}>{t}</span>; };
 
 function csv(lista, osr) {
-  const c = (v) => (/[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v);
   const filas = [['SKU', 'Descripción', 'Depto', 'Clase', 'Motivo', `Demanda ${osr}`, `Stock ${osr}`, 'Demanda otros CD', 'Necesita', 'Stock otros CD', 'Sugerido', 'Sin cubrir', 'CD origen', 'Ubicación', 'Unidades a extraer']];
   for (const x of lista) {
     const base = [x.sku, x.desc, x.depto, x.matriz || x.abc, MOTIVO[x.motivo]?.[0] || x.motivo, x.demOsr, x.stockOsr, x.demFuera, x.necesita, x.stockFuera, x.sugerido, x.noCubre];
     if (x.desde.length) x.desde.forEach((d) => filas.push([...base, d.cd, d.ubic, d.qty])); else filas.push([...base, '', '', '']);
   }
-  const blob = new Blob(['﻿' + filas.map((r) => r.map(c).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'reabasto-osr-ola.csv' });
+  descargar(filas, 'reabasto-osr-ola.csv');
+}
+
+function descargar(filas, nombre) {
+  const c = (v) => (/[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v);
+  const blob = new Blob(['\ufeff' + filas.map((r) => r.map(c).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
   a.click(); URL.revokeObjectURL(a.href);
+}
+
+// SKU de la ola: demanda en cada CD (con el stock de ese CD debajo), buscador por SKU o descripción y filtro por depto
+function TablaSkus({ datos, cds, osr }) {
+  const [buscar, setBuscar] = useState('');
+  const [depto, setDepto] = useState('');
+  const [soloFalta, setSoloFalta] = useState(false);
+  const deptos = [...new Set(datos.lista.map((x) => x.depto))].sort((a, b) => a.localeCompare(b));
+  const b = buscar.trim().toUpperCase();
+  const filas = datos.lista.filter((x) => (!depto || x.depto === depto) && (!soloFalta || x.faltante > 0) && (!b || x.sku.toUpperCase().includes(b) || x.desc.toUpperCase().includes(b)))
+    .map((x) => ({ ...x, ...Object.fromEntries(cds.map((c) => [`cd_${c}`, x.dem[c] || 0])) }));
+  const nombreCd = (c) => (c === 'SIN CD' ? 'Sin CD' : c);
+  const exportar = () => descargar([
+    ['SKU', 'Descripción', 'Depto', 'Clase', 'Logística OSR', 'En la Base', 'Demanda', ...cds.flatMap((c) => [`Demanda ${nombreCd(c)}`, `Stock ${nombreCd(c)}`]), 'Stock total', 'Faltante', 'Líneas', 'OD'],
+    ...filas.map((x) => [x.sku, x.desc, x.depto, x.matriz || x.abc, x.log, x.enBase ? 'SI' : 'NO', x.demanda, ...cds.flatMap((c) => [x.dem[c] || 0, c === 'SIN CD' ? '' : x.stock[c] || 0]), x.stockTotal, x.faltante, x.lineas, x.ods])
+  ], 'sku-ola.csv');
+  return <>
+    <div className="row spread" style={{ margin: '16px 0 6px', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10 }}>
+      <h3 style={{ margin: 0 }}>SKU de la ola ({N(filas.length)}{filas.length !== datos.total ? ` de ${N(datos.total)}` : ''})</h3>
+      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input type="search" placeholder="Buscar SKU o descripción" aria-label="Buscar SKU o descripción" value={buscar} onChange={(e) => setBuscar(e.target.value)} style={{ width: 220 }} />
+        <select value={depto} onChange={(e) => setDepto(e.target.value)} aria-label="Filtrar por depto" style={{ width: 'auto' }}>
+          <option value="">Todos los deptos</option>{deptos.map((d) => <option key={d}>{d}</option>)}</select>
+        <label className="hint" style={{ display: 'flex', gap: 6, alignItems: 'center', margin: 0 }}>
+          <input type="checkbox" checked={soloFalta} onChange={(e) => setSoloFalta(e.target.checked)} />Solo con faltante</label>
+        {filas.length > 0 && <button type="button" className="ghost" onClick={exportar}>Descargar CSV</button>}
+      </div>
+    </div>
+    {filas.length ? <TablaOrden key={depto + b + soloFalta} filas={filas} inicial={['demanda', -1]} max={30} clave={(x) => x.sku} cols={[
+      ['sku', 'SKU', false, (v, x) => <>{v}{!x.enBase && <span className="pill" title="El SKU no está en la Base de stock vigente" style={{ marginLeft: 6 }}>sin Base</span>}</>],
+      ['desc', 'Descripción'], ['depto', 'Depto'], ['matriz', 'Clase', false, (v, x) => v || x.abc], ['log', 'Log. OSR'],
+      ['demanda', 'Demanda', true, (v) => <b>{N(v)}</b>],
+      ...cds.map((c) => [`cd_${c}`, nombreCd(c), true, (v, x) => {
+        const s = c === 'SIN CD' ? x.stockTotal : x.stock[c] || 0;
+        return v ? <div title={`Demanda ${N(v)} · stock ${N(s)}`}><span style={{ color: s < v ? 'var(--red)' : undefined, fontWeight: s < v ? 600 : undefined }}>{N(v)}</span>
+          <div className="muted" style={{ fontSize: 11 }}>stock {N(s)}</div></div> : <span className="muted" title={`Stock ${N(s)}`}>—</span>;
+      }]),
+      ['stockTotal', 'Stock total', true, N], ['faltante', 'Faltante', true, (v) => (v ? <b style={{ color: 'var(--red)' }}>{N(v)}</b> : '—')],
+      ['lineas', 'Líneas', true, N], ['ods', 'OD', true, N]]} />
+      : <p className="empty">Ningún SKU coincide con la búsqueda.</p>}
+    <p className="hint" style={{ marginTop: 6 }}>En cada CD: lo que la ola pickea ahí y, debajo, el stock de ese SKU en el CD según la Base (en rojo si no alcanza). Para "Sin CD" se compara con el stock en todos los CD.
+      {datos.total > datos.lista.length ? ` Se muestran los ${N(datos.lista.length)} SKU con más demanda.` : ''}</p>
+  </>;
 }
 
 export default function ConsumoOlas({ filtros, cargaId }) {
@@ -113,6 +160,8 @@ export default function ConsumoOlas({ filtros, cargaId }) {
         ...cdsDem.map((c) => [`cd_${c}`, c === 'SIN CD' ? 'Sin CD' : c, true, (v) => (v ? N(v) : <span className="muted">—</span>)]),
         ['pOsr', `% en ${osr}`, true, pctf], ['falta', porSku ? 'SKU con faltante' : 'Faltante', true, rojo],
         porSku ? ['faltante', 'Unid. faltantes', true, (v) => (v ? N(v) : '—')] : ['skusFalta', 'SKU con faltante', true, (v) => (v ? N(v) : '—')]]} />
+
+      {r.skus && <TablaSkus datos={r.skus} cds={cdsDem} osr={osr} />}
 
       <div className="row spread" style={{ margin: '16px 0 6px', alignItems: 'center' }}>
         <h3 style={{ margin: 0 }}>SKU a reabastecer en {osr}{R.total ? ` (${N(R.total)})` : ''}</h3>

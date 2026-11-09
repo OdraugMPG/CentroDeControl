@@ -20,6 +20,9 @@ import Asignar from './pages/continuidad/Asignar.jsx';
 import Equipo from './pages/continuidad/Equipo.jsx';
 import Dotacion from './pages/continuidad/Dotacion.jsx';
 import Inventario from './pages/continuidad/Inventario.jsx';
+import InventarioCalendario from './pages/continuidad/InventarioCalendario.jsx';
+import InventarioDashboard from './pages/continuidad/InventarioDashboard.jsx';
+import InventarioValidacion from './pages/continuidad/InventarioValidacion.jsx';
 import Indicadores from './pages/continuidad/Indicadores.jsx';
 import Cargas from './pages/config/Cargas.jsx';
 import Configuracion from './pages/config/Configuracion.jsx';
@@ -49,7 +52,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="continuidad/asignar" element={<Asignar />} />
             <Route path="continuidad/equipo" element={<Equipo />} />
             <Route path="continuidad/dotacion" element={<Dotacion />} />
-            <Route path="continuidad/inventario" element={<Inventario />} />
+            <Route path="inventario" element={<Inventario />} />
+            <Route path="inventario/calendario" element={<InventarioCalendario />} />
+            <Route path="inventario/dashboard" element={<InventarioDashboard />} />
+            <Route path="inventario/validacion" element={<InventarioValidacion />} />
+            <Route path="continuidad/inventario" element={<Navigate to="/inventario" replace />} />
             <Route path="continuidad/indicadores" element={<Indicadores />} />
             <Route path="gestion/:vista?" element={<Gestion />} />
             <Route path="cargas" element={<Cargas />} />

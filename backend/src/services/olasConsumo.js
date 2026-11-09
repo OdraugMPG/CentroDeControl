@@ -6,6 +6,9 @@ import { baseSku } from '../gestion/services/abastecimientoOsr.js';
 const SIN_CD = 'SIN CD';
 const up = (v) => String(v ?? '').trim().toUpperCase();
 const MAX_SKU = 400;
+// número del depto ("601 JUVENIL MUJER" y "601" son el mismo)
+const codDepto = (v) => (String(v ?? '').trim().match(/^\d+/) || [''])[0];
+const MAX_LISTA = 5000;   // SKU de la ola que se envían en el detalle
 
 /** where = { sql, params } de las líneas de la ola (con los filtros del simulador); minOsr = stock que debe quedar en OSR por SKU */
 export async function consumoVsStock(where, { minOsr = 0, incluirY = false } = {}) {
@@ -16,6 +19,10 @@ export async function consumoVsStock(where, { minOsr = 0, incluirY = false } = {
   try { base = await baseSku(); } catch (e) { return { hayBase: false, mensaje: e.message }; }
   const osr = base.osr;
   const bs = new Map(base.skus.map((x) => [x.sku, x]));
+  // un solo nombre por depto: "número descripción" según la Base; la ola solo trae el número
+  const nomDepto = new Map();
+  for (const x of base.skus) { const c = codDepto(x.depto); if (c && !nomDepto.has(c) && x.depto.trim() !== c) nomDepto.set(c, x.depto.trim()); }
+  const depto = (v) => { const c = codDepto(v); return c ? nomDepto.get(c) || c : String(v ?? '').trim() || '(SIN DEPTO)'; };
 
   // SKU de la ola: demanda por CD y stock por CD según la Base
   const sk = new Map();
@@ -25,7 +32,7 @@ export async function consumoVsStock(where, { minOsr = 0, incluirY = false } = {
       const b = bs.get(l.sku);
       const stock = {};
       if (b) { if (b.osr > 0) stock[osr] = b.osr; for (const o of b.origen) stock[up(o.cd)] = (stock[up(o.cd)] || 0) + o.qty; }
-      x = { sku: l.sku, desc: l.descripcion || b?.desc || '', depto: b?.depto || l.dpto || '(SIN DEPTO)', abc: b?.abc || 'C', matriz: b?.matriz || '',
+      x = { sku: l.sku, desc: l.descripcion || b?.desc || '', depto: depto(b?.depto || l.dpto), abc: b?.abc || 'C', matriz: b?.matriz || '',
         log: b ? b.log || '' : up(l.log), enBase: !!b, dem: {}, stock, origen: b ? b.origen.slice().sort((a, c) => c.qty - a.qty) : [], lineas: 0, ods: 0 };
       sk.set(l.sku, x);
     }
@@ -88,6 +95,15 @@ export async function consumoVsStock(where, { minOsr = 0, incluirY = false } = {
     return [...m.values()].sort((a, b) => b.demanda - a.demanda);
   };
 
+  // detalle por SKU: demanda y stock en cada CD, faltante en los CD que lo pickean
+  const stockEn = (x, cd) => (cd === SIN_CD ? Object.values(x.stock).reduce((a, b) => a + b, 0) : x.stock[cd] || 0);
+  const detalle = skus.map((x) => {
+    const demanda = Object.values(x.dem).reduce((a, b) => a + b, 0);
+    const faltante = Object.entries(x.dem).reduce((a, [cd, d]) => a + Math.max(0, d - stockEn(x, cd)), 0);
+    return { sku: x.sku, desc: x.desc, depto: x.depto, abc: x.abc, matriz: x.matriz, log: x.log, enBase: x.enBase, lineas: x.lineas, ods: x.ods,
+      demanda, stockTotal: Object.values(x.stock).reduce((a, b) => a + b, 0), faltante, dem: x.dem, stock: x.stock };
+  }).sort((a, b) => b.demanda - a.demanda);
+
   const tot = porCd.reduce((t, r) => ({ demanda: t.demanda + r.demanda, faltante: t.faltante + r.faltante, cubierta: t.cubierta + r.cubierta }), { demanda: 0, faltante: 0, cubierta: 0 });
   const rOsr = reab.filter((x) => x.motivo !== 'Y PICKEADO FUERA DE OSR');
   const sum = (l, k) => l.reduce((a, x) => a + x[k], 0);
@@ -100,6 +116,7 @@ export async function consumoVsStock(where, { minOsr = 0, incluirY = false } = {
       y: { skus: reab.length - rOsr.length, unidades: sum(reab.filter((x) => x.motivo === 'Y PICKEADO FUERA DE OSR'), 'sugerido') },
       total: incluirY ? reab.length : rOsr.length, lista: (incluirY ? reab : rOsr).slice(0, MAX_SKU)
     },
-    porCd, porDepto: categoria('depto'), porClase: categoria('abc')
+    porCd, porDepto: categoria('depto'), porClase: categoria('abc'),
+    skus: { total: detalle.length, lista: detalle.slice(0, MAX_LISTA) }
   };
 }

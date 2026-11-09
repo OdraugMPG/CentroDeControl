@@ -1,4 +1,4 @@
-// Recepción: lo almacenado según la extracción ALM_USER del WMS (una fila por LPN ubicado). Unidades por hora y turno,
+// Almacenado (ruta /recepcion): lo almacenado según la extracción ALM_USER del WMS (una fila por LPN ubicado). Unidades por hora y turno,
 // por CD y operación, productividad por usuario y origen, para el rango de días y los filtros elegidos.
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -69,7 +69,7 @@ function Filtros({ r, f, set }) {
   );
 }
 
-export default function Recepcion({ titulo = 'Recepción', extra = null }) {
+export default function Recepcion({ titulo = 'Almacenado', extra = null }) {
   const [f, setF] = useState({ desde: '', hasta: '', cd: '', turno: '', operacion: '' });
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
   const d = useCarga(() => api.get(`/recepcion/almacenado${qs ? `?${qs}` : ''}`), [qs]);

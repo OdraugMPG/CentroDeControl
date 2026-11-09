@@ -3,7 +3,8 @@
 import { q, tx } from '../db.js';
 import { leerParametros } from './parametros.js';
 import { filasDeCarga, cargaInicio } from './stock.js';
-import { planificarDia } from '../engine/plan.js';
+import { planificarDia, turnosDelDia } from '../engine/plan.js';
+import { planInventarioCe, responsablesTurno, resolverCds, avanceDesdeResultado } from '../../services/inventarioTurnos.js';
 import { tareasConsolidacion, repartirConsolidacion, claveBloque } from '../engine/consolidacion.js';
 import { stockUnitario, repartirStockUnitario, SIN_UBICACION } from '../engine/stockUnitario.js';
 import { clasificacionActual } from './abcXyz.js';
@@ -45,7 +46,9 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
   const conCls = (txt, sku) => (cls(sku) ? (txt ? `${txt} · ABC ${cls(sku)}` : `ABC ${cls(sku)}`) : txt || null);
   const ORDEN_ABC = { A: 0, B: 1, C: 2 };
 
-  const tareas = [], plan = [], resumen = [], smUsadas = [];
+  const tareas = [], plan = [], resumen = [], smUsadas = [], asigCe = [];
+  // inventario de Control de Existencia: CD de la operación de las ubicaciones programadas para hoy
+  await resolverCds({ desde: fecha, hasta: fecha }).catch((e) => L('ALERTA', 'Inventario CE', `No se pudo resolver el CD de la programación: ${e.message}`));
   for (const c of cds) {
     const cd = c.cd;
     if (!cdsBase.has(cd)) { L('ALERTA', cd, 'El CD no aparece en la Base del día: no se generaron tareas.'); continue; }
@@ -54,8 +57,17 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
     const { rows: av } = await q('SELECT piso, zona FROM avance_inventario WHERE cd = $1', [cd]);
     let hechas = new Set(av.map((r) => up(r.piso) + '|' + up(r.zona)));
     // --- plan diario
-    let pl = planificarDia({ filas, cd, reservadas, excluido: p.excluidos.has(cd), hechas, fecha, p, modo: p.modoTareas, recInv: c.rec_inv, recCon: c.op_cons });
-    if (pl.resumen && p.modoTareas !== 2 && pl.resumen.zonasInv === 0 && hechas.size > 0) {
+    // si Control de Existencia programó inventario para hoy en este CD, el inventario del día es ese (en vez del ciclo propio)
+    const ce = p.modoTareas !== 2 ? await planInventarioCe({ fecha, cd, filas, p, recInv: c.rec_inv, nTur: turnosDelDia(fecha, p) }) : null;
+    let pl = planificarDia({ filas, cd, reservadas, excluido: p.excluidos.has(cd), hechas, fecha, p, modo: ce ? 2 : p.modoTareas, recInv: c.rec_inv, recCon: c.op_cons });
+    if (ce) {
+      if (p.modoTareas === 1) pl.lineas = [];
+      pl.lineas = [...pl.lineas, ...ce.lineas];
+      const R = ce.resumen;
+      L('INFO', cd, `Inventario según la programación de Control de Existencia: ${R.grupos} zona-pasillos, ${R.ubicaciones} ubicaciones, ${R.hh.toFixed(1)} HH con ${ce.recInv} recursos por turno (capacidad ${ce.capacidad.toFixed(1)} HH).`);
+      if (ce.pendientes.length) L('ALERTA', cd, `Inventario CE que no alcanza en los turnos de hoy (${R.hhPend.toFixed(1)} HH): ${ce.pendientes.map((g) => `${g.zp} ${g.ub} ubic.`).join(', ')}. Aumenta los recursos de inventario del CD o reprograma.`);
+    }
+    if (!ce && pl.resumen && p.modoTareas !== 2 && pl.resumen.zonasInv === 0 && hechas.size > 0) {
       await q('DELETE FROM avance_inventario WHERE cd = $1', [cd]);
       hechas = new Set();
       L('INFO', cd, `Ciclo de inventario completo (${pl.resumen.zonasCiclo} zonas). Se reinició el ciclo.`);
@@ -67,6 +79,16 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
     const r = pl.resumen;
     if (r) L('INFO', cd, `Plan diario: inventario ${r.hhWI.toFixed(1)} de ${r.totI.toFixed(1)} HH (${r.zonasHoy} zonas hoy, ${r.zonasPend} pendientes, ${r.zonasCiclo} ya en el ciclo); consolidación ${r.hhWC.toFixed(1)} de ${r.totC.toFixed(1)} HH.`);
     const sup = (tt) => (c['sup_t' + tt] || '').trim() || `SUPERVISOR T${tt}`;
+    const resp = ce ? await responsablesTurno(fecha, cd, c) : null;
+    if (ce) {
+      // la asignación de cada zona-pasillo en Inventario CD: turno con más HH, su supervisor y su jefe de turno de empresa externa
+      for (const g of ce.grupos) {
+        const ls = ce.lineas.filter((l) => l.zp === g.zp);
+        if (!ls.length) continue;
+        const tt = ls.reduce((a, l) => (l.hh > a.hh ? l : a)).turno;
+        asigCe.push({ fecha, cd, zona: g.zona, pasillo: g.zp, turno: tt, supervisor: resp[tt].supervisor || sup(tt), jefe: resp[tt].jefe, empresa: resp[tt].empresa });
+      }
+    }
 
     // --- consolidación del día: todos los movimientos de las zonas del plan, repartidos por turno según el % de cada zona
     const linCons = pl.lineas.filter((l) => l.tarea === 'CONSOLIDACION');
@@ -115,7 +137,7 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
         tareas.push({ fecha, cd, turno: tt, proceso: 'INV', folio: `INV-${fecha.slice(8, 10)}${fecha.slice(5, 7)}-T${tt}`, sub: null, secuencia: null,
           piso: l.piso, zona: l.zp, ubic_origen: null, sku: null, descripcion: `Contar zona ${l.zp} (${l.nOps} operario/s, ${Math.round(l.pct * 100)}% de la zona)`,
           ubic_destino: null, asignado_a: `${pref} ${cd} T${tt} INV ${l.ops}`, supervisor: s, unid_asig: l.ubicaciones || 0, estado: 'PENDIENTE',
-          detalle: `${l.hh.toFixed(2)} HH plan`, observacion: null, ext_id: `I|${cd}|${fecha.replace(/-/g, '')}|T${tt}|${up(l.piso)}|${up(l.zp)}` });
+          detalle: l.ce ? `${l.hh.toFixed(2)} HH plan · Control de Existencia${resp[tt].jefe ? ` · Jefe empresa: ${resp[tt].jefe}` : ''}` : `${l.hh.toFixed(2)} HH plan`, observacion: null, ext_id: `I|${cd}|${fecha.replace(/-/g, '')}|T${tt}|${up(l.piso)}|${up(l.zp)}` });
         rt.INV++; rt.unidades += l.ubicaciones || 0;
       }
       // consolidación del turno, agrupada por SKU (una tarea por SKU)
@@ -207,7 +229,18 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
         [id, l.cd, l.fecha, l.turno, l.tarea, l.piso, l.zp, l.hh, l.pct, l.ops, l.ubicaciones, l.movimientos, l.orden]);
     }
     if (smUsadas.length) await cx.query("UPDATE sm_cola SET estado = 'ASIGNADA', fecha_asig = $1 WHERE id = ANY($2)", [fecha, smUsadas]);
+    // Inventario CD: responsables de cada zona-pasillo de CE (se respeta lo asignado a mano)
+    for (const a of asigCe) {
+      await cx.query(`INSERT INTO public.inv_asig (fecha_op, cd, zona, pasillo, jefe_empresa, empresa, supervisor, asignado_por, automatica, turno, actualizado_en)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'Asignación diaria',true,$8,now()) ON CONFLICT (fecha_op, cd, zona, pasillo) DO UPDATE SET
+          jefe_empresa = EXCLUDED.jefe_empresa, empresa = EXCLUDED.empresa, supervisor = EXCLUDED.supervisor, asignado_por = EXCLUDED.asignado_por,
+          automatica = true, turno = EXCLUDED.turno, actualizado_en = now()
+        WHERE public.inv_asig.automatica OR public.inv_asig.jefe_empresa IS NULL`,
+        [a.fecha, a.cd, a.zona || '', a.pasillo, a.jefe || null, a.empresa || null, a.supervisor || null, a.turno]);
+    }
     return rows[0];
   });
+  // avance de inventario con lo que ya trae el resultado de la toma
+  await avanceDesdeResultado([fecha]).catch((e) => console.error('Avance de inventario CE:', e.message));
   return { ...asig, tareas: tareas.length };
 }

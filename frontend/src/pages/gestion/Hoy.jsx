@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha, hora, PROC } from './api.js';
 import { IrACarga, toast, useCarga } from './ui.jsx';
+import { useApp } from '../../lib/contexto.jsx';
 
 // [proceso, nombre, medida]: inventario se mide en ubicaciones a contar; el resto en unidades a mover
 const PROCS = [['INV', 'Inventario', 'ubicaciones'], ['CONS', 'Consolidación', 'unidades'], ['SU', 'Stock unitario', 'unidades'], ['SM', 'Slow moving', 'unidades'], ['REU', 'Reubicación ABC', 'unidades']];
@@ -20,6 +21,9 @@ function Celda({ x, total }) {
 }
 
 export default function Hoy({ fecha, irA }) {
+  const { puede } = useApp();
+  // cada paso tiene su permiso (Administración, Roles y permisos)
+  const [verConfig, verBase, verGenerar] = ['config', 'base', 'generar'].map((k) => puede(`gd.asignacion.${k}`));
   const [est, err, recargar] = useCarga(() => api.get('/api/estado' + qs({ fecha })), [fecha]);
   const [plan] = useCarga(() => api.get('/api/plan' + qs({ fecha })), [fecha, est?.asignacion?.id]);
   const [generando, setGenerando] = useState(false);
@@ -58,17 +62,17 @@ export default function Hoy({ fecha, irA }) {
         </div>
       </div>
 
-      <div className="sec">
+      {(verConfig || verBase || verGenerar) && <div className="sec">
         <ol className="steps">
-          <li className={est.cds.length ? 'ok' : ''}>
+          {verConfig && <li className={est.cds.length ? 'ok' : ''}>
             <span className="n">{est.cds.length ? '✓' : 1}</span>
             <div>
               <h3>Configuración</h3>
               <div className="note">{activos.length} CD activos: {activos.map((c) => c.cd).join(', ') || '—'} · {fmt(est.reservadas)} ubicaciones reservadas para stock unitario.</div>
               {!est.cds.length && <div className="note">Los CD se crean solos al cargar la primera Base. Después revisa operarios y supervisores en <button className="btn sm" onClick={() => irA('config')}>Configuración</button></div>}
             </div>
-          </li>
-          <li className={inicio ? 'ok' : ''}>
+          </li>}
+          {verBase && <li className={inicio ? 'ok' : ''}>
             <span className="n">{inicio ? '✓' : 2}</span>
             <div>
               <h3>Base del inicio de la jornada</h3>
@@ -78,8 +82,8 @@ export default function Hoy({ fecha, irA }) {
               </div>
               {(inicio?.avisos || []).map((x) => <div key={x} className="alert warn">{x}</div>)}
             </div>
-          </li>
-          <li className={a ? 'ok' : ''}>
+          </li>}
+          {verGenerar && <li className={a ? 'ok' : ''}>
             <span className="n">{a ? '✓' : 3}</span>
             <div>
               <h3>Asignación diaria</h3>
@@ -93,9 +97,9 @@ export default function Hoy({ fecha, irA }) {
                 </div>
               )}
             </div>
-          </li>
+          </li>}
         </ol>
-      </div>
+      </div>}
 
       {a && (
         <>

@@ -12,7 +12,6 @@ const ARCHIVOS = {
   pedidos: ['muestra/Flujo_de_pedido.xlsx', 'Modelo_Flujo_de_pedido.xlsx'],
   reservadas: ['ejemplo-gestion/Blq_Stk_unit_ejemplo.xlsx', 'Modelo_Blq_Stk_unit.xlsx'],
   proevt: ['ejemplo-gestion/Pro_Evt_ejemplo.xlsx', 'Modelo_Pro_Evt.xlsx'],
-  inventario: ['ejemplo-continuidad/Calendario_inventario_ejemplo.xlsx', 'Modelo_Calendario_inventario.xlsx'],
 };
 
 const COLS_PICKING = ['ESTADO', 'DESC_ESTADO', 'JAULA', 'OD', 'SOLICITUD', 'RUT', 'DESTINATARIO', 'SKU', 'DESCRIPCION', 'QTY', 'DPTO', 'REGION', 'CITY',
@@ -23,6 +22,18 @@ const filaPicking = (o) => COLS_PICKING.map((h) => o[h] ?? '');
 
 // [hoja, columnas, filas de ejemplo, instrucciones, nombre del archivo]
 const GENERADOS = {
+  inventario: ['Programacion', ['Loc', 'Ubicación', 'Seteo', 'Zona', 'Pasillo', 'Seccion', 'Vuelta', 'LADO', 'Fecha programada', 'Mes programado', 'Re-Programacion', 'Fecha Toma', 'Mes de Toma'],
+    [['SHELVING 3', 'IOB13-001-A', 'A', 'IOB13', '13', 'S1', '1', 'PAR', '2026-11-16', 'NOVIEMBRE', '', '', ''],
+      ['SHELVING 3', 'IOB13-002-A', 'A', 'IOB13', '13', 'S1', '1', 'IMPAR', '2026-11-16', 'NOVIEMBRE', '2026-11-17', '', '']],
+    ['Programación oficial de Control de Existencia: una fila por ubicación. Obligatorias: Loc (CD), Ubicación, Zona, Pasillo y Fecha programada.',
+      'Si trae Re-Programación, esa fecha reemplaza a la programada. La operación debe pasar 2 días hábiles (lunes a sábado) antes: CE lunes → viernes, martes → sábado, miércoles → lunes, jueves → martes, viernes → miércoles.',
+      'Cada carga reemplaza las fechas programadas que trae; las asignaciones de jefe de turno y supervisor se conservan. Se analiza en Continuidad, Inventario CD.'], 'Modelo_Programacion_inventario_CE.xlsx'],
+  inventario_resultado: ['Resultado', ['UBICACION', 'CD', 'EMPRESA', 'ZONA', 'PASILLO', 'SKU', 'CONTADO', 'SISTEMA', 'DIFERENCIA', 'ESTADO', 'USUARIO', 'FECHA', 'F_MOD', 'TURNO', 'VALIDACION', 'REQUIERE_SUPERVISOR', 'NIVEL_URGENCIA', 'ULTIMO_REGISTRO'],
+    [['IOB13-001-A', 'SHELVING 3', 'ADECCO', 'IOB13', '13', '700707999', 12, 12, 0, 'OK', 'operario1', '2026-11-13', '2026-11-13 10:15', 'AM', '', 'NO', 'BAJA', 'SI'],
+      ['IOB13-002-A', 'SHELVING 3', 'ADECCO', 'IOB13', '13', '416655999', 3, 5, -2, 'DIFERENCIA', 'operario1', '2026-11-13', '2026-11-13 10:22', 'AM', '', 'SI', 'ALTA', 'SI']],
+    ['Resultado de la toma de inventario: una fila por ubicación y SKU contado. Obligatorias: UBICACION, CD, CONTADO, SISTEMA y FECHA.',
+      'Si hay reconteos, vale la fila con ULTIMO_REGISTRO = SI (o la de F_MOD más reciente). Se reemplazan los días que trae el archivo.',
+      'ERI = líneas sin diferencia de unidades / líneas contadas. ERU = líneas en que el SKU está (o no está) donde dice el sistema / líneas contadas.'], 'Modelo_Resultado_inventario.xlsx'],
   olas: ['Olas', COLS_PICKING, [
     filaPicking({ ESTADO: '2090', DESC_ESTADO: 'ALLOCATED', OD: '196051406', SOLICITUD: '3133069160', SKU: '252782007', DESCRIPCION: 'POLERA BASICA XS', QTY: 2, DPTO: '664', REGION: '05', CITY: 'Valparaiso', FECHA_SALIDA: '2026-10-30', FACILITY: 'CD1', TIPO_OLA: 'NORMAL', TIPO_ORDEN: 'DESPACHO', FECHA_VENTA: '2026-10-28', CD_PICKING: 'OSR', TIPO_PICKING: 'TAREA' }),
   ], ['Reporte del simulador de olas. Columnas obligatorias: FECHA_SALIDA, TIPO_PICKING y QTY.', 'Cada carga reemplaza a la anterior y se analiza en Operación, Simulador de olas.'], 'Modelo_Simulador_de_olas.xlsx'],

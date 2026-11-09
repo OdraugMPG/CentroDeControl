@@ -5,11 +5,16 @@ import { q, tx } from '../db.js';
 import { cat } from '../lib/catalogos.js';
 import { addDias, fechaOperativa, instancia } from '../lib/turnos.js';
 import { estadoTarea, autoTraspaso, indicadores, dotacionTurno } from '../services/continuidad.js';
-import { leerTablas, normHeader, txt, soloFecha } from '../import/excel.js';
+import { leerLibro } from '../import/excel.js';
+import { importarInventario, analisisInventario, asignar } from '../services/inventarioCe.js';
+import { simularDia } from '../services/inventarioTurnos.js';
+import { dashboardInventario } from '../services/inventarioDashboard.js';
+import { validacionToma } from '../services/inventarioValidacion.js';
+import { calendario, ubicacionesGrupo, reprogramar, quitar, restaurar } from '../services/inventarioCalendario.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
 
 const r = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });   // la programación de CE y el resultado de la toma pueden ser grandes
 
 const conEstado = async rows => { const c = await cat(), now = Date.now(); return rows.map(t => ({ ...t, st: estadoTarea(t, c, now) })); };
 const SELECT_TAREAS = `SELECT t.*, p.nombre AS asignado_nombre, p.rol AS asignado_rol, o.turno_id AS heredada_de_turno, o.fecha AS heredada_de_fecha
@@ -19,7 +24,8 @@ const jefeDe = async (turnoId, client = { query: q }) =>
 
 // ---------- Equipo ----------
 r.get('/personas', ah(async (req, res) => {
-  res.json((await q('SELECT * FROM personas WHERE activo ORDER BY turno_id NULLS FIRST, rol, nombre')).rows);
+  res.json((await q(`SELECT p.*, e.nombre AS empresa FROM personas p LEFT JOIN empresas e ON e.id = p.empresa_id
+    WHERE p.activo ORDER BY p.turno_id NULLS FIRST, p.rol, p.nombre`)).rows);
 }));
 r.post('/personas', ah(async (req, res) => {
   const nombre = texto(req.body.nombre, 120), rol = req.body.rol;
@@ -222,54 +228,24 @@ r.get('/inventario', ah(async (req, res) => {
   ]);
   res.json({ layout: lay.rows, asignaciones: asig.rows });
 }));
-r.post('/inventario/layout', ah(async (req, res) => {
-  const cd = texto(req.body.cd, 80); if (!cd) throw bad('Ingresa el CD.');
-  await q('INSERT INTO inv_layout (cd, nivel, zona, pasillo) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
-    [cd, texto(req.body.nivel, 80) || '', texto(req.body.zona, 80) || '', texto(req.body.pasillo, 80) || '']);
-  res.status(201).json({ ok: true });
-}));
-r.delete('/inventario/layout/:id', ah(async (req, res) => { await q('DELETE FROM inv_layout WHERE id = $1', [+req.params.id]); res.json({ ok: true }); }));
-r.post('/inventario', ah(async (req, res) => {
-  const b = req.body;
-  const cd = texto(b.cd, 80); if (!cd) throw bad('Selecciona el CD.');
-  const { rows: [x] } = await q(`INSERT INTO inv_asignaciones (cd, nivel, zona, pasillo, jefe_turno, supervisor, qty_op, adecco, fecha_asignado)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [cd, texto(b.nivel, 80), texto(b.zona, 80), texto(b.pasillo, 80), texto(b.jefe_turno, 120), texto(b.supervisor, 120),
-      texto(b.qty_op, 20), texto(b.adecco, 20), fecha(b.fecha_asignado, 'fecha asignada')]);
-  res.status(201).json(x);
-}));
-r.patch('/inventario/:id', ah(async (req, res) => {
-  const f = req.body.fecha_ejecutado === null ? null : fecha(req.body.fecha_ejecutado || fechaOperativa(Date.now(), await cat()), 'fecha ejecutado');
-  const { rows: [x] } = await q('UPDATE inv_asignaciones SET fecha_ejecutado = $2 WHERE id = $1 RETURNING *', [+req.params.id, f]);
-  res.json(x);
-}));
-r.delete('/inventario/:id', ah(async (req, res) => { await q('DELETE FROM inv_asignaciones WHERE id = $1', [+req.params.id]); res.json({ ok: true }); }));
-
-// Calendario de inventario desde Excel: CD, Nivel, Zona, Pasillo, Jefe Turno, Supervisor, Qty. Op., Asignado, Adecco, Ejecutado, Tiempo, Estado
-const INV_MAP = { CD: 'cd', NIVEL: 'nivel', ZONA: 'zona', PASILLO: 'pasillo', JEFE_TURNO: 'jefe_turno', JEFETURNO: 'jefe_turno',
-  SUPERVISOR: 'supervisor', QTY_OP: 'qty_op', QTY: 'qty_op', ASIGNADO: 'fecha_asignado', ADECCO: 'adecco', EJECUTADO: 'fecha_ejecutado',
-  TIEMPO: 'tiempo', ESTADO: 'estado_original' };
+// Programación de Control de Existencia y resultado de la toma (se reconoce solo cuál archivo es)
 r.post('/inventario/importar', upload.single('archivo'), ah(async (req, res) => {
   if (!req.file) throw bad('Adjunta el archivo.');
-  const tablas = await leerTablas(req.file.buffer, req.file.originalname, ['CD']);
-  if (!tablas.length) throw bad('No encontré la columna CD.');
-  let n = 0;
-  await tx(async c => {
-    for (const raw of tablas[0].filas) {
-      const o = {};
-      for (const [k, v] of Object.entries(raw)) { const f = INV_MAP[normHeader(k)]; if (f) o[f] = v; }
-      const cd = txt(o.cd); if (!cd) continue;
-      const asignado = soloFecha(o.fecha_asignado); if (!asignado) continue;
-      await c.query('INSERT INTO inv_layout (cd, nivel, zona, pasillo) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
-        [cd, txt(o.nivel) || '', txt(o.zona) || '', txt(o.pasillo) || '']);
-      await c.query(`INSERT INTO inv_asignaciones (cd, nivel, zona, pasillo, jefe_turno, supervisor, qty_op, adecco, fecha_asignado, fecha_ejecutado, tiempo, estado_original)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [cd, txt(o.nivel), txt(o.zona), txt(o.pasillo), txt(o.jefe_turno), txt(o.supervisor), txt(o.qty_op), txt(o.adecco),
-          asignado, soloFecha(o.fecha_ejecutado), txt(o.tiempo), txt(o.estado_original)]);
-      n++;
-    }
-  });
-  res.status(201).json({ importadas: n });
+  res.status(201).json(await importarInventario(await leerLibro(req.file.buffer, req.file.originalname), req.file.originalname));
 }));
+r.get('/inventario/analisis', ah(async (req, res) => { res.json(await analisisInventario(req.query)); }));
+// dashboard: SKU y unidades, ERI / ERU histórico por CD, resultado neto y absoluto, top de SKU y matriz ABC / XYZ
+r.get('/inventario/dashboard', ah(async (req, res) => { res.json(await dashboardInventario(req.query)); }));
+// validación de la toma por pasada (primera, segunda y tercera)
+r.get('/inventario/validacion', ah(async (req, res) => { res.json(await validacionToma(req.query)); }));
+// simulación por turno de un día: lo que la asignación diaria publicará como inventario de CE
+r.get('/inventario/simulacion', ah(async (req, res) => { res.json(await simularDia(fecha(req.query.fecha, 'fecha'))); }));
+// Calendario de planificación: ver la programación de CE y ajustarla en la web
+r.get('/inventario/calendario', ah(async (req, res) => { res.json(await calendario(req.query)); }));
+r.get('/inventario/calendario/grupo', ah(async (req, res) => { res.json(await ubicacionesGrupo(req.query)); }));
+r.post('/inventario/reprogramar', ah(async (req, res) => { res.json(await reprogramar(req.body || {}, usuarioDe(req))); }));
+r.post('/inventario/quitar', ah(async (req, res) => { res.json(await quitar(req.body || {}, usuarioDe(req))); }));
+r.post('/inventario/restaurar', ah(async (req, res) => { res.json(await restaurar(req.body || {})); }));
+r.put('/inventario/asignacion', ah(async (req, res) => { res.json(await asignar(req.body || {}, usuarioDe(req))); }));
 
 export default r;

@@ -21,6 +21,7 @@ import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
+import { personal, guardarEmpresa, guardarPersona, bajaPersona, guardarRotacion, guardarRotacionEmpresa } from '../services/personal.js';
 
 const app = Router();
 const subir = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
@@ -204,6 +205,15 @@ app.post('/config/reservadas', subir.single('archivo'), r(async (req) => {
   for (const x of lista) await q('INSERT INTO ubic_reservadas (ubicacion, grupo, max) VALUES ($1,$2,$3)', [x.ubicacion, x.grupo, x.max]);
   return { cargadas: lista.length };
 }));
+// Personal por turno y rotación (Administración, Configuración)
+app.get('/config/personal', r(() => personal()));
+app.post('/config/empresas', r((req) => guardarEmpresa(null, req.body || {})));
+app.put('/config/empresas/:id', r((req) => guardarEmpresa(+req.params.id, req.body || {})));
+app.post('/config/personal', r((req) => guardarPersona(null, req.body || {})));
+app.put('/config/personal/:id', r((req) => guardarPersona(+req.params.id, req.body || {})));
+app.delete('/config/personal/:id', r((req) => bajaPersona(+req.params.id)));
+app.put('/config/rotacion/:grupo', r((req) => guardarRotacion(req.params.grupo, req.body || {})));
+app.put('/config/rotacion-empresa/:id', r((req) => guardarRotacionEmpresa(+req.params.id, req.body || {})));
 app.get('/config/ciclo', r(async () => (await q('SELECT cd, count(*)::int AS zonas, max(fecha) AS ultima FROM avance_inventario GROUP BY cd ORDER BY cd')).rows));
 app.delete('/config/ciclo/:cd', r(async (req) => ({ eliminadas: (await q('DELETE FROM avance_inventario WHERE cd = $1', [req.params.cd])).rowCount })));
 

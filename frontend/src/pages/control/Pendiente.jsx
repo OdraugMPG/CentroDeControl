@@ -1,4 +1,4 @@
-// Almacenamiento: lo pendiente por almacenar (última foto del WMS, una fila por iLPN), con filtros por ZONA, ORIGEN, AÑO, MES,
+// Por almacenar (ruta /almacenamiento): lo pendiente por almacenar (última foto del WMS, una fila por iLPN), con filtros por ZONA, ORIGEN, AÑO, MES,
 // DIA, EMPRESA_USUARIO, LEVEL, DESC_DEPTO, TEMPORADA, CD_DESDE y CD. La antigüedad se mide desde FECHA_CREAC hasta la carga.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -33,7 +33,7 @@ function Corte({ titulo, filas, tot, className = 's6', vacio, max = 12, hint }) 
   );
 }
 
-export default function Pendiente({ titulo = 'Almacenamiento', extra = null }) {
+export default function Pendiente({ titulo = 'Por almacenar', extra = null }) {
   const [filtros, setFiltros] = useState({});
   const f = Object.fromEntries(Object.entries(filtros).filter(([, s]) => s.size).map(([k, s]) => [k, [...s]]));
   const fj = JSON.stringify(f);

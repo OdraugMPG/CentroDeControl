@@ -52,7 +52,7 @@ export function movimientosPorSku(filasCd, nSkuUbic) {
   return res;
 }
 
-function programar(tarea, ord, hh, iniT, capT, hT, rec, finT, lin, nT) {
+export function programar(tarea, ord, hh, iniT, capT, hT, rec, finT, lin, nT) {
   const nG = hh.length;
   const rest = hh.slice();
   let quedan = rest.reduce((a, b) => a + b, 0);

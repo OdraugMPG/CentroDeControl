@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, fmt, fFecha } from './api.js';
 import { IrACarga, toast, useCarga } from './ui.jsx';
+import PersonalTurnos from './PersonalTurnos.jsx';
 
 function FilaCD({ c, onGuardar }) {
   const [x, setX] = useState(c);
@@ -37,7 +38,8 @@ export default function Config() {
   const grupos = (res || []).reduce((a, x) => ({ ...a, [x.grupo || '(sin piso)']: (a[x.grupo || '(sin piso)'] || 0) + 1 }), {});
   return (
     <>
-      <div className="top"><div><h1>Configuración</h1><div className="sub">Lo que usa la asignación diaria: CD activos, operarios fijos y supervisores por turno, parámetros del libro y ubicaciones reservadas.</div></div></div>
+      <div className="top"><div><h1>Configuración</h1><div className="sub">Empresas y personal por turno con su rotación, y lo que usa la asignación diaria: CD activos, operarios fijos y supervisores por turno, parámetros del libro y ubicaciones reservadas.</div></div></div>
+      <PersonalTurnos />
       <div className="sec">
         <h2>CD y turnos</h2>
         <div className="tbl">
@@ -47,6 +49,7 @@ export default function Config() {
           </table>
         </div>
         {cds && !cds.length && <p className="note">Los CD aparecen al cargar la primera Base de stock.</p>}
+        <p className="note">Sup. T1, T2 y T3 se completan solos con los supervisores Paris que tienen ese CD (según su turno de la semana). Si un CD no tiene supervisores Paris asignados, se escriben a mano.</p>
       </div>
       <div className="sec">
         <div className="row spread"><h2 style={{ margin: 0 }}>Ubicaciones reservadas para stock unitario (Blq_Stk_unit)</h2><IrACarga id="reservadas" etiqueta="Cargar Blq_Stk_unit (en Datos)" /></div>

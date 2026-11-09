@@ -7,13 +7,23 @@ const CLAVE_MIN = 8;
 
 function Marco({ titulo, sub, children }) {
   return (
-    <div className="wrap">
-      <div className="login">
-        <h1>Centro de Control</h1>
-        <h2>{titulo}</h2>
-        {sub && <p className="muted">{sub}</p>}
-        {children}
+    <div className="acceso">
+      <div className="acceso-fondo" aria-hidden="true">
+        {['login-fondo-1.jpg', 'login-fondo-2.jpg'].map((f) => <div key={f} style={{ backgroundImage: `url(${import.meta.env.BASE_URL}${f})` }} />)}
       </div>
+      <h1 className="acceso-titulo">Centro de Control</h1>
+      <div className="acceso-panel">
+        <div className="login">
+          <img className="acceso-mascota" src={`${import.meta.env.BASE_URL}login-mascota.png`} alt="" width="446" height="470" />
+          <h2>{titulo}</h2>
+          {sub && <p className="muted">{sub}</p>}
+          {children}
+        </div>
+      </div>
+      <footer className="acceso-pie">
+        <img src={`${import.meta.env.BASE_URL}login-slogan-1.png`} alt="Un solo Cencosud" width="112" height="60" />
+        <img src={`${import.meta.env.BASE_URL}login-slogan-2.png`} alt="Servir de forma extraordinaria en cada momento" width="147" height="60" />
+      </footer>
     </div>
   );
 }

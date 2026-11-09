@@ -13,9 +13,9 @@ const LinkModelo = ({ tipo, texto = 'Descargar modelo' }) => <a href={modelo(tip
 
 const TIPOS = [
   ['pedidos', 'Flujo de pedidos', 'La misma extracción que hoy alimenta la tabla dinámica (Flujo de pedido.xlsx). Se detecta sola la fila de encabezados. Cada carga se compara con la anterior para calcular las unidades que salieron de cada etapa: cuanto más seguido se cargue, más preciso es el control por hora.'],
-  ['almacenado', 'Almacenados', 'La extracción de almacenados del WMS (ALM_USER): una fila por LPN ubicado con QUANTITY, F_MOD, TURNO, ITEM_ID, TARGET_LOCATION_ID, USUARIO, CD, OPERACION… Se reemplazan los días que trae el archivo y se analiza en Operación, Recepción.', true],
+  ['almacenado', 'Almacenados', 'La extracción de almacenados del WMS (ALM_USER): una fila por LPN ubicado con QUANTITY, F_MOD, TURNO, ITEM_ID, TARGET_LOCATION_ID, USUARIO, CD, OPERACION… Se reemplazan los días que trae el archivo y se analiza en Operación, Almacenado.', true],
   ['recepcion', 'Recepción: citas', 'Citas del día con sus horas de llegada, descarga y unidades. Volver a cargar el mismo día actualiza las citas.'],
-  ['almacenamiento', 'Almacenamiento (pendiente y almacenados)', 'Se reconoce solo cuál archivo es. Pendiente por almacenar: la foto del WMS con una fila por iLPN (ILPN_ID, QTY, ZONA, ORIGEN, FECHA_CREAC, CD…); cada carga reemplaza la anterior. Almacenados (ALM_USER): una fila por LPN ubicado (QUANTITY, F_MOD, TURNO, USUARIO, CD, OPERACION…); se reemplazan los días que trae. Ambos se analizan en Operación, Almacenamiento.'],
+  ['almacenamiento', 'Por almacenar y almacenados', 'Se reconoce solo cuál archivo es. Pendiente por almacenar: la foto del WMS con una fila por iLPN (ILPN_ID, QTY, ZONA, ORIGEN, FECHA_CREAC, CD…); cada carga reemplaza la anterior. Almacenados (ALM_USER): una fila por LPN ubicado (QUANTITY, F_MOD, TURNO, USUARIO, CD, OPERACION…); se reemplazan los días que trae. Lo pendiente se analiza en Operación, Por almacenar y los almacenados en Operación, Almacenado.'],
   ['pendiente', 'Pendiente por almacenar', '', true],
   ['olas', 'Simulador de olas', 'El reporte del simulador de olas (ESTADO, OD, SKU, QTY, FECHA_SALIDA, TIPO_PICKING…). Cada carga reemplaza a la anterior y se analiza en Operación, Simulador de olas.']
 ];
@@ -55,9 +55,11 @@ const ARCHIVOS = {
       r => `${N(r.skus)} SKU, ${N(r.unidades)} unidades.`],
   ],
   continuidad: [
-    ['inventario', 'Calendario de inventario', 'Asignaciones del inventario cíclico por CD, nivel, zona y pasillo, con fechas de asignación y ejecución.',
-      '/continuidad/inventario/importar', ['co.inventario'], 'inventario', ['/continuidad/inventario', 'Inventario CD'],
-      r => `${N(r.importadas)} asignaciones importadas.`],
+    ['inventario', 'Inventario: programación de CE y resultado de la toma', 'Se reconoce solo cuál archivo es. Programación de Control de Existencia (Loc, Ubicación, Zona, Pasillo, Fecha programada, Re-Programación…): se reemplazan las fechas programadas que trae, sin perder las asignaciones. Resultado de la toma (UBICACION, CD, SKU, CONTADO, SISTEMA, FECHA…): se reemplazan los días que trae.',
+      '/continuidad/inventario/importar', ['co.inventario.cargar'], [['inventario', 'Modelo programación CE'], ['inventario_resultado', 'Modelo resultado de la toma']], ['/inventario', 'Inventario CD'],
+      r => (r.tipo === 'programa'
+        ? `Programación: ${N(r.filas)} ubicaciones, fechas CE del ${dmy(r.desde)} al ${dmy(r.hasta)} (operación del ${dmy(r.opDesde)} al ${dmy(r.opHasta)})${r.reprogramadas ? `, ${N(r.reprogramadas)} re-programadas` : ''}${r.sinFecha ? `. ${N(r.sinFecha)} filas sin fecha programada se omitieron` : ''}.`
+        : `Resultado de la toma: ${N(r.filas)} líneas en ${N(r.ubicaciones)} ubicaciones, del ${dmy(r.desde)} al ${dmy(r.hasta)}.`)],
   ],
 };
 
@@ -84,7 +86,7 @@ function CargaArchivo({ id, titulo, ayuda, url, modeloTipo, ir, mensaje, campo }
         <input type="checkbox" checked={anterior} onChange={e => setAnterior(e.target.checked)} />
         Es una versión anterior: solo se guarda para comparar y no reemplaza la proyección activa</label>}
       <SubirArchivo onFile={subir} disabled={subiendo} texto={subiendo ? 'Procesando…' : 'Elegir archivo'} />
-      <p className="hint" style={{ marginTop: 8 }}><LinkModelo tipo={modeloTipo} /> · <Link to={ir[0]}>Ir a {ir[1]}</Link></p>
+      <p className="hint" style={{ marginTop: 8 }}>{Array.isArray(modeloTipo) ? modeloTipo.map(([t, l]) => <span key={t}><LinkModelo tipo={t} texto={l} /> · </span>) : <><LinkModelo tipo={modeloTipo} /> · </>}<Link to={ir[0]}>Ir a {ir[1]}</Link></p>
       {res && <p className={`msg ${res.ok ? '' : 'err'}`} role="status">{res.t}</p>}
     </section>
   );
@@ -98,7 +100,7 @@ function StockGestion({ onCargado }) {
   const [tipo, setTipo] = useState('inicio');
   const [subiendo, setSubiendo] = useState(false);
   const [res, setRes] = useState(null);
-  const puedeInicio = p('da.cargas', 'gd.asignacion'), puedeCierre = p('da.cargas', 'gd.conciliacion');
+  const puedeInicio = p('da.cargas', 'gd.asignacion.base'), puedeCierre = p('da.cargas', 'gd.conciliacion');
   const tipoOk = tipo === 'inicio' ? puedeInicio : puedeCierre;
   const subir = async f => {
     setSubiendo(true); setRes(null);
