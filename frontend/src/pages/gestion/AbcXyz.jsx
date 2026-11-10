@@ -210,6 +210,98 @@ function PorCd({ porCd, cds }) {
   );
 }
 
+/** Resumen por departamento: tamaño, venta y mezcla de clases de cada depto del ámbito. Un clic en la fila filtra la vista. */
+function PorDepto({ deptos, depto, setDepto, ambito, criterio }) {
+  const [modo, setModo] = useState('abc');
+  const T = deptos.reduce((t, x) => ({ skus: t.skus + x.skus, stock: t.stock + x.stock, metrica: t.metrica + x.metrica, ventas: t.ventas + x.ventas, sinVenta: t.sinVenta + x.sinVenta }),
+    { skus: 0, stock: 0, metrica: 0, ventas: 0, sinVenta: 0 });
+  const totAbc = (k, c) => deptos.reduce((t, x) => t + (x.abc[k]?.[c] || 0), 0);
+  const totCel = (k, c) => deptos.reduce((t, x) => t + (x.celdas[k]?.[c] || 0), 0);
+  const met = (x) => (criterio === 'valor' ? '$' + fmt(x) : fmt(x));
+  const rot = (x) => (x.stock > 0 ? fmt(x.ventas / x.stock, 2) : '—');
+  const fondo = (v) => ({ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 55)}%, transparent)` });
+  const celda = (x, k) => {
+    const c = x.celdas[k];
+    if (!c) return <span className="muted">—</span>;
+    return modo === 'mtx' ? pc(div(c.stock, x.stock)) : <>{fmt(c.skus)} <span className="muted">/ {fmt(c.stock)}</span></>;
+  };
+  const csv = () => {
+    const filas = [['Depto', 'SKU', '% SKU', 'Unidades', '% unidades', criterio === 'valor' ? 'Venta ($)' : 'Venta 2m (u.)', '% venta', 'Rotación', 'Sin venta',
+      ...['A', 'B', 'C'].flatMap((k) => [`SKU ${k}`, `Unidades ${k}`, `Venta ${k}`]), ...CLASES.flatMap((k) => [`SKU ${k}`, `Unidades ${k}`])],
+    ...deptos.map((x) => [x.depto, x.skus, fmt(div(x.skus, T.skus) * 100, 1), x.stock, fmt(div(x.stock, T.stock) * 100, 1), Math.round(x.metrica), fmt(div(x.metrica, T.metrica) * 100, 1),
+      x.stock > 0 ? fmt(x.ventas / x.stock, 3) : '', x.sinVenta,
+      ...['A', 'B', 'C'].flatMap((k) => [x.abc[k]?.skus || 0, x.abc[k]?.stock || 0, Math.round(x.abc[k]?.metrica || 0)]), ...CLASES.flatMap((k) => [x.celdas[k]?.skus || 0, x.celdas[k]?.stock || 0])])];
+    const txt = filas.map((f) => f.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/csv;charset=utf-8' }));
+    a.download = `abc_xyz_por_depto_${ambito.replace(/\s+/g, '_')}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  if (!deptos.length) return null;
+  return (
+    <div className="sec">
+      <div className="row spread" style={{ marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>Resumen por departamento · {ambito}</h2>
+        <div className="row" style={{ alignItems: 'center' }}>
+          <div className="chips">
+            <button className="chip" aria-pressed={modo === 'abc'} onClick={() => setModo('abc')}>Clases ABC</button>
+            <button className="chip" aria-pressed={modo === 'mtx'} onClick={() => setModo('mtx')}>ABC-XYZ (% unidades del depto)</button>
+            <button className="chip" aria-pressed={modo === 'abs'} onClick={() => setModo('abs')}>ABC-XYZ (SKU / unidades)</button>
+          </div>
+          <button className="btn sm" onClick={csv}>Descargar CSV</button>
+        </div>
+      </div>
+      <div className="tbl" style={{ maxHeight: 560 }}>
+        <table>
+          <thead>
+            {modo === 'abc' ? (
+              <tr><th>Depto</th><th className="num">SKU</th><th className="num">Unidades</th><th className="num">Venta 2m</th><th className="num">Rotación</th><th className="num">Sin venta</th>
+                {['A', 'B', 'C'].map((k) => <th key={k} className="num"><span className={'pill ' + tono(k + 'X')}>{k}</span> SKU · % venta</th>)}</tr>
+            ) : (
+              <tr><th>Depto</th><th className="num">Unidades</th>{CLASES.map((k) => <th key={k} className="num"><span className={'pill ' + tono(k)}>{k}</span></th>)}</tr>
+            )}
+          </thead>
+          <tbody>
+            {deptos.map((x) => (
+              <tr key={x.depto} aria-selected={depto === x.depto} style={{ cursor: 'pointer' }} title="Clic para filtrar la vista por este depto" onClick={() => setDepto(depto === x.depto ? '' : x.depto)}>
+                <td>{x.depto}</td>
+                {modo === 'abc' ? <>
+                  <td className="num">{fmt(x.skus)} <span className="muted">({pc(div(x.skus, T.skus), 0)})</span></td>
+                  <td className="num">{fmt(x.stock)} <span className="muted">({pc(div(x.stock, T.stock), 0)})</span></td>
+                  <td className="num">{met(x.metrica)} <span className="muted">({pc(div(x.metrica, T.metrica), 0)})</span></td>
+                  <td className="num">{rot(x)}</td>
+                  <td className="num">{fmt(x.sinVenta)} <span className="muted">({pc(div(x.sinVenta, x.skus), 0)})</span></td>
+                  {['A', 'B', 'C'].map((k) => <td key={k} className="num" style={fondo(div(x.abc[k]?.metrica || 0, x.metrica))}>{fmt(x.abc[k]?.skus || 0)} <span className="muted">· {pc(div(x.abc[k]?.metrica || 0, x.metrica), 0)}</span></td>)}
+                </> : <>
+                  <td className="num">{fmt(x.stock)}</td>
+                  {CLASES.map((k) => <td key={k} className="num" style={modo === 'mtx' ? fondo(div(x.celdas[k]?.stock || 0, x.stock)) : undefined}>{celda(x, k)}</td>)}
+                </>}
+              </tr>
+            ))}
+            <tr className="tot">
+              <td>Total</td>
+              {modo === 'abc' ? <>
+                <td className="num">{fmt(T.skus)}</td><td className="num">{fmt(T.stock)}</td><td className="num">{met(T.metrica)}</td>
+                <td className="num">{T.stock > 0 ? fmt(T.ventas / T.stock, 2) : '—'}</td><td className="num">{fmt(T.sinVenta)}</td>
+                {['A', 'B', 'C'].map((k) => <td key={k} className="num">{fmt(totAbc(k, 'skus'))} · {pc(div(totAbc(k, 'metrica'), T.metrica), 0)}</td>)}
+              </> : <>
+                <td className="num">{fmt(T.stock)}</td>
+                {CLASES.map((k) => <td key={k} className="num">{modo === 'mtx' ? pc(div(totCel(k, 'stock'), T.stock)) : <>{fmt(totCel(k, 'skus'))} <span className="muted">/ {fmt(totCel(k, 'stock'))}</span></>}</td>)}
+              </>}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="note">
+        {modo === 'abc' && 'Entre paréntesis, la participación del depto en el ámbito. En A / B / C: SKU de la clase y % de la venta del depto que generan. Rotación = venta 2 meses / unidades almacenadas.'}
+        {modo === 'mtx' && 'Cada fila suma 100%: qué parte de las unidades del depto es de cada clase. Mucho CY / CZ indica stock que no se vende.'}
+        {modo === 'abs' && 'SKU / unidades almacenadas del depto en cada clase.'}
+        {' '}La clase de cada SKU es la del ámbito completo ({ambito}). Clic en una fila para filtrar toda la vista por ese depto.
+      </p>
+    </div>
+  );
+}
+
 /** Clase ABC-XYZ por piso: cómo se reparten las clases en los pisos del ámbito (un CD o todos, agrupados por CD). */
 function PorPiso({ porPiso, ambito, todos }) {
   const [modo, setModo] = useState('comp');
@@ -281,7 +373,8 @@ export default function AbcXyz() {
   const [criterio, setCriterio] = useState('unidades');
   const [metodo, setMetodo] = useState('rotacion');
   const [celda, setCelda] = useState('');
-  const [d, err, rec] = useCarga(() => api.get('/api/abcxyz' + qs({ cd, criterio, metodo, celda })), [cd, criterio, metodo, celda]);
+  const [depto, setDepto] = useState('');
+  const [d, err, rec] = useCarga(() => api.get('/api/abcxyz' + qs({ cd, criterio, metodo, celda, depto })), [cd, criterio, metodo, celda, depto]);
 
   const borrarHist = async () => { await api.del('/api/abcxyz/historia'); toast('Historia de ventas borrada.'); setMetodo('rotacion'); rec(); };
   const guardar = async () => {
@@ -293,7 +386,8 @@ export default function AbcXyz() {
   const { celdas, abc, total, porCd } = d.resumen;
   const u = d.umbrales;
   const lectura = LECTURA[d.metodo];
-  const ambito = d.cd === TODOS ? 'todos los CD' : d.cd;
+  const ambitoCd = d.cd === TODOS ? 'todos los CD' : d.cd;
+  const ambito = ambitoCd + (d.depto ? ' · ' + d.depto : '');
   const met = (x) => (criterio === 'valor' ? '$' + fmt(x) : fmt(x) + ' u.');
   const xyzTxt = d.metodo === 'historia'
     ? `XYZ por variabilidad de la venta mensual (X ≤ ${u.x}, Y ≤ ${u.y} de coeficiente de variación)`
@@ -322,6 +416,11 @@ export default function AbcXyz() {
             <button className="chip" aria-pressed={d.cd === TODOS} onClick={() => cambiar(setCd)(TODOS)}>Todos los CD</button>
             {d.cds.map((x) => <button key={x} className="chip" aria-pressed={x === d.cd} onClick={() => cambiar(setCd)(x)}>{x}</button>)}
           </div>
+          <label className="lbl" htmlFor="abc-depto" style={{ marginTop: 12, display: 'block' }}>Departamento</label>
+          <select id="abc-depto" value={d.depto} onChange={(e) => cambiar(setDepto)(e.target.value)}>
+            <option value="">Todos los deptos ({fmt(d.deptos.length)})</option>
+            {[...d.deptos].sort((a, b) => a.depto.localeCompare(b.depto, 'es', { numeric: true })).map((x) => <option key={x.depto} value={x.depto}>{x.depto} · {fmt(x.skus)} SKU</option>)}
+          </select>
         </div>
         <div>
           <span className="lbl">ABC por</span>
@@ -388,6 +487,8 @@ export default function AbcXyz() {
         </div>
         <p className="note">Haz clic en una celda o una fila para filtrar el detalle.</p>
       </div>
+
+      <PorDepto deptos={d.deptos} depto={d.depto} setDepto={cambiar(setDepto)} ambito={ambitoCd} criterio={criterio} />
 
       {d.cd === TODOS && <PorCd porCd={porCd} cds={d.cds} />}
 

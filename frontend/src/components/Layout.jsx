@@ -13,7 +13,7 @@ function SelectorTema() {
   const cambiar = t => { setTema(t); aplicarTema(t); };
   return (
     <div className="tema" role="group" aria-label="Tema de la pantalla">
-      {TEMAS.map(([k, l]) => <button key={k} type="button" aria-pressed={tema === k} title={`Tema ${l.toLowerCase()}`} onClick={() => cambiar(k)}>{{ auto: 'Auto', claro: '☀ Claro', oscuro: '☾ Oscuro' }[k]}</button>)}
+      {TEMAS.map(([k, l]) => <button key={k} type="button" aria-pressed={tema === k} title={`Tema ${l.toLowerCase()}`} onClick={() => cambiar(k)}><span className="tema-i" aria-hidden="true">{{ auto: 'A', claro: '☀', oscuro: '☾' }[k]}</span><span className="tema-t">{{ auto: 'Auto', claro: '☀ Claro', oscuro: '☾ Oscuro' }[k]}</span></button>)}
     </div>
   );
 }
@@ -23,7 +23,8 @@ function Reloj() {
   const [, tick] = useState(0);
   useEffect(() => { const id = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(id); }, []);
   const s = Math.max(0, Math.round((proxima - Date.now()) / 1000));
-  return <span>Actualiza en {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>;
+  const t = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return <span className="reloj" title={`Se actualiza en ${t}`}><span className="reloj-t">Actualiza en </span><span className="reloj-i" aria-hidden="true">↻ </span>{t}</span>;
 }
 
 function Cuenta({ onClave }) {
@@ -56,6 +57,16 @@ export default function Layout() {
   const { pathname } = useLocation();
   const [clave, setClave] = useState(false);
   useEffect(() => setClave(false), [pathname]);
+  // alto de la barra superior en --appbar-h: los encabezados fijos de las vistas quedan justo debajo
+  const barra = useRef(null);
+  const hayBarra = !!cuenta && !cuenta.cambiarClave;
+  useEffect(() => {
+    const el = barra.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--appbar-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hayBarra]);
 
   if (cuenta === undefined) return <div className="wrap"><p className="msg">Cargando…</p></div>;
   if (!cuenta) return <Login />;
@@ -73,7 +84,7 @@ export default function Layout() {
 
   return (
     <>
-      <header className="appbar">
+      <header className="appbar" ref={barra}>
         <div className="in">
           <div className="brand">
             <h1><NavLink to={inicio || '/'}>Centro de Control</NavLink></h1>

@@ -8,6 +8,10 @@ import { SIN_CD } from './inventarioTurnos.js';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const CAMPO = { ce: 'fecha_ce', op: 'fecha_op' };
+// primera toma de la ubicación en el resultado (CD de almacenamiento), como en Inventario CD: cuenta desde N días antes
+// de la fecha de operación y hasta 30 días después (después de la operación, con demora)
+const TOMA = (cds, dias) => `LEFT JOIN LATERAL (SELECT min(r.fecha) AS ft FROM inv_resultado r
+    WHERE r.cd = ANY(${cds}::text[]) AND r.ubicacion = p.ubicacion AND r.fecha BETWEEN p.fecha_op - ${dias}::int AND p.fecha_op + 30) t ON NOT p.excluida`;
 
 /** Grupos (día, CD, zona-pasillo) entre desde y hasta, por fecha de CE o de operación */
 export async function calendario({ desde, hasta, cd, ver = 'ce' } = {}) {
@@ -15,27 +19,31 @@ export async function calendario({ desde, hasta, cd, ver = 'ce' } = {}) {
   if (!desde || !hasta) throw bad('Indica el rango de fechas.');
   const f = CAMPO[ver] || 'fecha_ce';
   const cdF = txt(cd) ? txt(cd).toUpperCase() : null;
+  const param = await paramsInv();
   const [g, cds, aj] = await Promise.all([
     q(`SELECT ${f}::text AS fecha, coalesce(cd_op, '${SIN_CD}') AS cd, zona, pasillo, max(piso) AS piso,
+         count(t.ft)::int AS tomadas, count(*) FILTER (WHERE t.ft > fecha_op)::int AS tarde, max(t.ft)::text AS ult_toma,
          count(*) FILTER (WHERE NOT excluida)::int AS ubicaciones, count(*) FILTER (WHERE excluida)::int AS quitadas,
          count(*) FILTER (WHERE fecha_reprog IS NOT NULL AND NOT excluida)::int AS reprog, count(*) FILTER (WHERE ajustada)::int AS ajustadas,
          min(fecha_ce)::text AS fecha_ce, min(fecha_op)::text AS fecha_op, min(fecha_prog)::text AS prog_min, max(fecha_prog)::text AS prog_max
-       FROM inv_programa WHERE ${f} BETWEEN $1 AND $2 AND ($3::text IS NULL OR coalesce(cd_op, '${SIN_CD}') = $3)
-       GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 4`, [desde, hasta, cdF]),
+       FROM inv_programa p ${TOMA('$4', '$5')}
+       WHERE ${f} BETWEEN $1 AND $2 AND ($3::text IS NULL OR coalesce(cd_op, '${SIN_CD}') = $3)
+       GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 4`, [desde, hasta, cdF, param.cds, param.diasPrevios]),
     q(`SELECT DISTINCT coalesce(cd_op, '${SIN_CD}') AS cd FROM inv_programa WHERE ${f} BETWEEN $1::date - 60 AND $2::date + 60 ORDER BY 1`, [desde, hasta]),
     q(`SELECT a.accion, a.fecha_nueva::text, a.usuario, a.creado_en, a.fecha_prog::text, count(*)::int AS ubicaciones, min(p.pasillo) AS pasillo, min(coalesce(p.cd_op, '${SIN_CD}')) AS cd
        FROM inv_ajuste a LEFT JOIN inv_programa p ON p.cd = a.cd AND p.ubicacion = a.ubicacion AND p.fecha_prog = a.fecha_prog
        GROUP BY a.accion, a.fecha_nueva, a.usuario, a.creado_en, a.fecha_prog ORDER BY a.creado_en DESC LIMIT 30`)
   ]);
-  return { desde, hasta, ver: f === 'fecha_op' ? 'op' : 'ce', cds: cds.rows.map((x) => x.cd), grupos: g.rows, ajustes: aj.rows, param: await paramsInv() };
+  return { desde, hasta, ver: f === 'fecha_op' ? 'op' : 'ce', cds: cds.rows.map((x) => x.cd), grupos: g.rows, ajustes: aj.rows, param };
 }
 
 /** Ubicaciones de un grupo del calendario */
 export async function ubicacionesGrupo({ ver = 'ce', fecha, cd, pasillo }) {
   const f = CAMPO[ver] || 'fecha_ce';
+  const { cds, diasPrevios } = await paramsInv();
   const { rows } = await q(`SELECT id, ubicacion, zona, pasillo, seccion, vuelta, lado, seteo, fecha_prog::text, fecha_reprog::text, fecha_ce::text, fecha_op::text,
-      fecha_toma::text, excluida, ajustada FROM inv_programa
-    WHERE ${f} = $1 AND coalesce(cd_op, '${SIN_CD}') = $2 AND pasillo = $3 ORDER BY ubicacion`, [soloFecha(fecha), cd, pasillo]);
+      fecha_toma::text, excluida, ajustada, t.ft::text AS inventariada FROM inv_programa p ${TOMA('$4', '$5')}
+    WHERE ${f} = $1 AND coalesce(cd_op, '${SIN_CD}') = $2 AND pasillo = $3 ORDER BY ubicacion`, [soloFecha(fecha), cd, pasillo, cds, diasPrevios]);
   return rows;
 }
 

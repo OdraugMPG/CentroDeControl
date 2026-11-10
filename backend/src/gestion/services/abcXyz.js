@@ -62,16 +62,35 @@ export async function clasificacionActual() {
   return calcular(rows[0]?.criterio === 'valor' ? 'valor' : 'unidades', rows[0]?.xyz_metodo || 'rotacion');
 }
 
-/** Clasificación de un CD (o TODOS), con matriz, curva de Pareto, apertura por CD y detalle filtrable por celda. */
-export async function abcXyz({ cd, criterio = 'unidades', metodo, celda, limite = 1000 }) {
+/** Resumen por departamento: SKU, unidades, venta, clases ABC y celdas ABC-XYZ de cada depto (la clase es la del ámbito). */
+function porDepto(filas) {
+  const m = new Map();
+  for (const x of filas) {
+    let d = m.get(x.depto);
+    if (!d) { d = { depto: x.depto, skus: 0, stock: 0, metrica: 0, ventas: 0, sinVenta: 0, abc: {}, celdas: {} }; m.set(x.depto, d); }
+    d.skus++; d.stock += x.stock; d.metrica += x.metrica; d.ventas += x.ventas;
+    if (!(x.ventas > 0)) d.sinVenta++;
+    const a = (d.abc[x.abc] ??= { skus: 0, stock: 0, metrica: 0 });
+    a.skus++; a.stock += x.stock; a.metrica += x.metrica;
+    const c = (d.celdas[x.matriz] ??= { skus: 0, stock: 0 });
+    c.skus++; c.stock += x.stock;
+  }
+  return [...m.values()].sort((a, b) => b.metrica - a.metrica || b.stock - a.stock || cmp(a.depto, b.depto));
+}
+
+/** Clasificación de un CD (o TODOS), con matriz, curva de Pareto, apertura por CD, resumen por depto y detalle filtrable por depto y celda. */
+export async function abcXyz({ cd, criterio = 'unidades', metodo, celda, depto, limite = 1000 }) {
   const d = await calcular(criterio === 'valor' ? 'valor' : 'unidades', metodo);
   const cds = [...d.grupos.keys()].filter((c) => c !== TODOS).sort(cmp);
   const cdSel = d.grupos.has(cd) ? cd : TODOS;
-  const delCd = d.grupos.get(cdSel);
+  const todoCd = d.grupos.get(cdSel);
+  // el depto filtra lo que se muestra; la clase de cada SKU sigue siendo la del ámbito completo
+  const delCd = depto ? todoCd.filter((x) => x.depto === depto) : todoCd;
   const sel = celda ? delCd.filter((x) => x.matriz === celda) : delCd;
   const { rows: g } = await q('SELECT count(*)::int AS n, max(actualizado_en) AS en, max(criterio) AS criterio, max(xyz_metodo) AS metodo FROM abc_xyz');
   return {
     carga: d.carga, cds, cd: cdSel, criterio, metodo: d.metodo, historia: d.historia, umbrales: d.umbrales, hayVentas: d.hayVentas, hayCosto: d.hayCosto,
+    depto: depto || '', deptos: porDepto(todoCd),
     resumen: resumir(delCd), pareto: curvaPareto(delCd), sinVenta: delCd.filter((x) => !(x.ventas > 0)).length,
     filas: sel.length, detalle: sel.slice(0, limite).map(({ stockCd, stockPiso, ...x }) => x), guardado: g[0].n ? g[0] : null,
   };

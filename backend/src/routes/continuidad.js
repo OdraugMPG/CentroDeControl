@@ -10,6 +10,7 @@ import { importarInventario, analisisInventario, asignar } from '../services/inv
 import { simularDia } from '../services/inventarioTurnos.js';
 import { dashboardInventario } from '../services/inventarioDashboard.js';
 import { validacionToma } from '../services/inventarioValidacion.js';
+import { comparacionCe, precisionProgramacion } from '../services/inventarioComparacion.js';
 import { calendario, ubicacionesGrupo, reprogramar, quitar, restaurar } from '../services/inventarioCalendario.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
 
@@ -238,6 +239,10 @@ r.get('/inventario/analisis', ah(async (req, res) => { res.json(await analisisIn
 r.get('/inventario/dashboard', ah(async (req, res) => { res.json(await dashboardInventario(req.query)); }));
 // validación de la toma por pasada (primera, segunda y tercera)
 r.get('/inventario/validacion', ah(async (req, res) => { res.json(await validacionToma(req.query)); }));
+// toma oficial de CE contra la toma de la operación (días antes) por ubicación y SKU
+r.get('/inventario/comparacion', ah(async (req, res) => { res.json(await comparacionCe(req.query)); }));
+// precisión de la programación de CE (original y re-programada) contra la toma real de CE
+r.get('/inventario/dashboard/programacion', ah(async (req, res) => { res.json(await precisionProgramacion(req.query)); }));
 // simulación por turno de un día: lo que la asignación diaria publicará como inventario de CE
 r.get('/inventario/simulacion', ah(async (req, res) => { res.json(await simularDia(fecha(req.query.fecha, 'fecha'))); }));
 // Calendario de planificación: ver la programación de CE y ajustarla en la web

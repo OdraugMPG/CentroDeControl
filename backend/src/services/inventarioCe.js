@@ -13,6 +13,7 @@ import { cat } from '../lib/catalogos.js';
 import { addDias, fechaOperativa } from '../lib/turnos.js';
 import { resolverCds, avanceDesdeResultado, SIN_CD } from './inventarioTurnos.js';
 import { aplicarAjustes } from './inventarioCalendario.js';
+import { guardarTomaCe } from './inventarioComparacion.js';
 
 const LOTE = 5000;
 const REPROG_MAX_ANTES = 31;   // días
@@ -50,6 +51,9 @@ const campo = (fila, ...claves) => {
 
 /** todo: la programación del archivo es la base definitiva y reemplaza toda la programación cargada (no solo su rango) */
 export async function importarInventario(hojas, archivo, { todo = false } = {}) {
+  // toma oficial de CE (Teórico y Físico): se compara con la toma de la operación en Toma CE vs operación
+  const tomaCe = buscarTablas(hojas, ['UBICACION', 'SKU', 'TEORICO', 'FISICO']);
+  if (tomaCe.length) return { tipo: 'toma_ce', ...(await guardarTomaCe(tomaCe.flatMap((t) => t.filas), archivo)) };
   const res = buscarTablas(hojas, ['UBICACION', 'CONTADO', 'SISTEMA']);
   if (res.length) {
     const r = await guardarResultado(res.flatMap((t) => t.filas), archivo);
@@ -66,7 +70,7 @@ export async function importarInventario(hojas, archivo, { todo = false } = {}) 
     await resolverCds({ desde: addDias(h, -30), hasta: addDias(h, 60) }).catch(() => null);
     return { tipo: 'programa', ...r };
   }
-  throw Object.assign(new Error('No reconocí el archivo. La programación de CE debe tener Loc, Ubicación, Zona, Pasillo y Fecha programada; el resultado de la toma, UBICACION, CD, SKU, CONTADO y SISTEMA.'), { status: 400 });
+  throw Object.assign(new Error('No reconocí el archivo. La programación de CE debe tener Loc, Ubicación, Zona, Pasillo y Fecha programada; el resultado de la toma, UBICACION, CD, SKU, CONTADO y SISTEMA; la toma de CE, Fecha, Ubicación, SKU, Teorico y Fisico.'), { status: 400 });
 }
 
 async function guardarPrograma(crudas, archivo, todo = false) {

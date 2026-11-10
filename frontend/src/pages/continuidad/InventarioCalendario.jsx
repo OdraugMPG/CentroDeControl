@@ -15,11 +15,24 @@ const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0
 const fechaDe = (iso) => new Date(`${iso}T12:00:00`);
 const sumar = (iso, n) => { const d = fechaDe(iso); d.setDate(d.getDate() + n); return ymd(d); };
 const diaTxt = (iso) => `${DIAS[fechaDe(iso).getDay()]} ${dmy(iso)}`;
+
+// ¿La operación inventarió el pasillo? Según el resultado de la toma (desde 2 días antes de la fecha de operación).
+// El reporte no trae las ubicaciones vacías, por eso desde el 90% se da por inventariado.
+const COMPLETO = 0.9;
+function estadoToma(g, hoy) {
+  if (!g.ubicaciones) return null;
+  const p = g.tomadas / g.ubicaciones, pct = `${Math.round(p * 100)}%`;
+  const det = `${N(g.tomadas)} de ${N(g.ubicaciones)} ubicaciones con resultado (${pct})${g.tarde ? `, ${N(g.tarde)} después de la operación` : ''}${g.ult_toma ? ` · última toma ${dmy(g.ult_toma)}` : ''}`;
+  if (p >= COMPLETO) return { k: 'ok', i: '✓', t: `Inventariado: ${det}` };
+  if (g.tomadas) return { k: 'parcial', i: pct, t: `Inventariado en parte: ${det}` };
+  if (hoy && g.fecha_op < hoy) return { k: 'no', i: '✕', t: `No inventariado: la operación era el ${dmy(g.fecha_op)} y no hay resultado` };
+  return { k: 'pend', i: '', t: 'Pendiente: aún no llega la fecha de operación' };
+}
 // N días hábiles (lunes a sábado) antes
 const operacion = (iso, n) => { let f = iso; for (let i = 0; i < n;) { f = sumar(f, -1); if (fechaDe(f).getDay() !== 0) i++; } return f; };
 
 // Detalle de un grupo con sus ubicaciones y los ajustes
-function Detalle({ g, ver, param, puedeEditar, onCambio, onCerrar }) {
+function Detalle({ g, ver, param, hoy, puedeEditar, onCambio, onCerrar }) {
   const { avisar } = useApp();
   const d = useCarga(() => api.get(`/continuidad/inventario/calendario/grupo?${new URLSearchParams({ ver, fecha: g.fecha, cd: g.cd, pasillo: g.pasillo })}`), [g.fecha, g.cd, g.pasillo, ver]);
   const [sel, setSel] = useState(new Set());
@@ -39,7 +52,7 @@ function Detalle({ g, ver, param, puedeEditar, onCambio, onCerrar }) {
   const domingo = nueva && fechaDe(nueva).getDay() === 0;
   const ver_ = todas ? filas : filas.slice(0, 200);
   return (
-    <Card title={`${g.pasillo} · ${g.cd}`} hint={`Control de Existencia ${diaTxt(g.fecha_ce)} · operación ${diaTxt(g.fecha_op)} · ${N(g.ubicaciones)} ubicaciones${g.quitadas ? `, ${N(g.quitadas)} quitadas` : ''}${g.reprog ? ` · ${N(g.reprog)} re-programadas` : ''}${g.ajustadas ? ` · ${N(g.ajustadas)} con ajuste en la web` : ''}`}
+    <Card title={`${g.pasillo} · ${g.cd}`} hint={`Control de Existencia ${diaTxt(g.fecha_ce)} · operación ${diaTxt(g.fecha_op)} · ${N(g.ubicaciones)} ubicaciones${g.quitadas ? `, ${N(g.quitadas)} quitadas` : ''}${g.reprog ? ` · ${N(g.reprog)} re-programadas` : ''}${g.ajustadas ? ` · ${N(g.ajustadas)} con ajuste en la web` : ''}${estadoToma(g, hoy) ? ` · ${estadoToma(g, hoy).t}` : ''}`}
       actions={<button type="button" className="ghost" onClick={onCerrar}>Cerrar</button>}>
       {puedeEditar && <div className="row" style={{ gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', padding: 10, borderRadius: 8, background: 'var(--bg)', marginBottom: 10 }}>
         <label className="field" style={{ width: 'auto' }}><span>Nueva fecha de Control de Existencia</span>
@@ -59,13 +72,15 @@ function Detalle({ g, ver, param, puedeEditar, onCambio, onCerrar }) {
         <div className="tscroll" style={{ maxHeight: 420, overflow: 'auto' }}><table>
           <thead><tr>{puedeEditar && <th><input type="checkbox" aria-label="Marcar todas" checked={filas.length > 0 && filas.every((u) => sel.has(u.id))}
             onChange={(e) => setSel(e.target.checked ? new Set(filas.map((u) => u.id)) : new Set())} /></th>}
-            <th>Ubicación</th><th>Sección</th><th>Vuelta</th><th>Lado</th><th>Programada</th><th>Re-programación</th><th>CE vigente</th><th>Operación</th><th>Toma CE</th><th>Estado</th></tr></thead>
+            <th>Ubicación</th><th>Sección</th><th>Vuelta</th><th>Lado</th><th>Programada</th><th>Re-programación</th><th>CE vigente</th><th>Operación</th><th>Toma CE</th><th>Inventariada</th><th>Estado</th></tr></thead>
           <tbody>{ver_.map((u) => (
             <tr key={u.id} style={u.excluida ? { opacity: 0.5 } : undefined}>
               {puedeEditar && <td><input type="checkbox" aria-label={`Marcar ${u.ubicacion}`} checked={sel.has(u.id)} onChange={() => setSel((s) => { const x = new Set(s); x.has(u.id) ? x.delete(u.id) : x.add(u.id); return x; })} /></td>}
               <td className="mono">{u.ubicacion}</td><td>{u.seccion || '—'}</td><td>{u.vuelta || '—'}</td><td>{u.lado || '—'}</td>
               <td>{dmy(u.fecha_prog)}</td><td>{u.fecha_reprog ? dmy(u.fecha_reprog) : '—'}</td><td>{diaTxt(u.fecha_ce)}</td><td>{diaTxt(u.fecha_op)}</td>
               <td>{u.fecha_toma ? dmy(u.fecha_toma) : '—'}</td>
+              <td>{u.inventariada ? <span className={u.inventariada > u.fecha_op ? 'warn' : 'ok'} title={u.inventariada > u.fecha_op ? 'Después de la fecha de operación' : ''}>✓ {dmy(u.inventariada)}</span>
+                : u.excluida ? '—' : <span className={hoy && u.fecha_op < hoy ? 'warn' : 'muted'}>{hoy && u.fecha_op < hoy ? 'No' : 'Pendiente'}</span>}</td>
               <td>{u.excluida ? <span className="st vencida">Quitada</span> : u.ajustada ? <span className="st abierta">Ajustada en la web</span> : u.fecha_reprog ? <span className="st abierta">Re-programada (Excel)</span> : <span className="muted">Según Excel</span>}</td>
             </tr>))}</tbody>
         </table></div>
@@ -103,6 +118,7 @@ export default function InventarioCalendario() {
 
   return (
     <>
+      <div className="cal-fijo">
       <PageHead title="Calendario de planificación" sub="La programación de Control de Existencia por día y zona-pasillo. Ajusta fechas o quita ubicaciones aquí, sin volver a subir el Excel: los ajustes se conservan si se carga de nuevo la programación.">
         <Link to="/inventario">Ir a Inventario CD</Link>
       </PageHead>
@@ -122,13 +138,19 @@ export default function InventarioCalendario() {
         {r && <span className="hint" style={{ margin: 0 }}>{N(totMes)} ubicaciones en el mes</span>}
       </div>
 
-      {!r ? <Cargando error={d.error} /> : <>
+      {r && <>
         <div className="row" style={{ gap: 14, flexWrap: 'wrap', margin: '0 0 8px', fontSize: 12.5 }}>
           {r.cds.map((c) => <span key={c} className="row" style={{ gap: 5, alignItems: 'center' }}><i style={{ width: 10, height: 10, borderRadius: 2, background: colorCd(c), display: 'inline-block' }} />{c}</span>)}
-          <span className="muted">↻ re-programada · ✎ ajustada en la web · tachado = quitada</span>
+          <span className="muted"><b className="tom-ley t-ok">✓</b> inventariado · <b className="tom-ley t-parcial">%</b> en parte · <b className="tom-ley t-no">✕</b> no inventariado · ↻ re-programada · ✎ ajustada en la web · tachado = quitada</span>
         </div>
+        <div className="cal-inv cal-inv-sem" aria-hidden="true">
+          {['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'].map((x) => <div key={x} className="cal-inv-h">{x}</div>)}
+        </div>
+      </>}
+      </div>
+
+      {!r ? <Cargando error={d.error} /> : <>
         <div className="cal-inv" role="grid" aria-label={`Calendario de ${MESES[+m.slice(5, 7) - 1]}`}>
-          {['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'].map((x) => <div key={x} className="cal-inv-h" role="columnheader">{x}</div>)}
           {dias.map((f) => {
             const gs = porDia.get(f) || [];
             const tot = gs.reduce((a, g) => a + g.ubicaciones, 0);
@@ -137,14 +159,16 @@ export default function InventarioCalendario() {
                 <div className="cal-inv-n"><b>{+f.slice(8, 10)}</b>{tot > 0 && <span>{N(tot)} ubic.</span>}</div>
                 {gs.map((g) => {
                   const act = grupo && grupo.fecha === g.fecha && grupo.cd === g.cd && grupo.pasillo === g.pasillo;
-                  return <button key={`${g.cd}|${g.pasillo}`} type="button" className={`cal-inv-g${act ? ' act' : ''}`} style={{ borderLeftColor: colorCd(g.cd), textDecoration: g.ubicaciones ? undefined : 'line-through' }}
-                    title={`${g.cd} · ${g.pasillo} · ${N(g.ubicaciones)} ubicaciones · CE ${diaTxt(g.fecha_ce)} · operación ${diaTxt(g.fecha_op)}`} onClick={() => setGrupo(act ? null : g)}>
-                    <span>{g.pasillo}</span><span className="muted">{N(g.ubicaciones)}{g.reprog > 0 ? ' ↻' : ''}{g.ajustadas > 0 ? ' ✎' : ''}</span></button>;
+                  const e = estadoToma(g, hoy);
+                  return <button key={`${g.cd}|${g.pasillo}`} type="button" className={`cal-inv-g${act ? ' act' : ''}${e ? ` tom-${e.k}` : ''}`} style={{ borderLeftColor: colorCd(g.cd), textDecoration: g.ubicaciones ? undefined : 'line-through' }}
+                    title={`${g.cd} · ${g.pasillo} · ${N(g.ubicaciones)} ubicaciones · CE ${diaTxt(g.fecha_ce)} · operación ${diaTxt(g.fecha_op)}${e ? `
+${e.t}` : ''}`} onClick={() => setGrupo(act ? null : g)}>
+                    <span>{e?.i && <i className="tom-i" aria-hidden="true">{e.i}</i>}{g.pasillo}</span><span className="muted">{N(g.ubicaciones)}{g.reprog > 0 ? ' ↻' : ''}{g.ajustadas > 0 ? ' ✎' : ''}</span></button>;
                 })}
               </div>);
           })}
         </div>
-        {grupo && <Detalle key={`${grupo.fecha}|${grupo.cd}|${grupo.pasillo}|${ver}`} g={grupo} ver={ver} param={r.param} puedeEditar={puedeEditar}
+        {grupo && <Detalle key={`${grupo.fecha}|${grupo.cd}|${grupo.pasillo}|${ver}`} g={grupo} ver={ver} param={r.param} hoy={hoy} puedeEditar={puedeEditar}
           onCambio={() => { d.recargar(); setGrupo(null); }} onCerrar={() => setGrupo(null)} />}
         {!grupo && <p className="hint">Haz clic en una zona-pasillo para ver sus ubicaciones{puedeEditar ? ' y reprogramarla o quitarla' : ''}.</p>}
         {r.ajustes.length > 0 && <Card title="Últimos ajustes hechos en la web" hint="Se vuelven a aplicar si se sube de nuevo el Excel de Control de Existencia.">

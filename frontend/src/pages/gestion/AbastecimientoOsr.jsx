@@ -348,7 +348,7 @@ function ConfigEventos({ onGuardar }) {
 // =============================================================================================
 // Pasos 5 y 6: reabasto por proyección y abastecimiento
 // =============================================================================================
-const VISTAS_RP = [['det', 'Plan por SKU (RP_Detalle)'], ['no', 'SKU no aptos (RP_NoAptos)'], ['ab', 'Abastecimiento (AB_Resumen)'], ['pick', 'Lista de traslado (AB_Picking)'], ['esp', 'Espacio que se libera (AB_Espacio)']];
+const VISTAS_RP = [['det', 'Plan por SKU (RP_Detalle)'], ['no', 'SKU no aptos (RP_NoAptos)'], ['ab', 'Abastecimiento (AB_Resumen)'], ['pick', 'Lista de traslado (AB_Picking)'], ['esp', 'Espacio que se libera (AB_Espacio)'], ['totes', 'Sugerido en totes (vs target OSR)']];
 
 const ALCANCE_VER = { OSR: 'OSR', 'OTROS CD': 'Otros CD', 'SIN BASE': 'Sin SKU en Base' };
 const ESTADO_VER = { SUBE: ['Sube', 'ok'], BAJA: ['Baja', 'mid'], NUEVO: ['Nuevo', 'ok'], QUITADO: ['Quitado', 'bad'], IGUAL: ['Igual', ''] };
@@ -450,6 +450,84 @@ function useOrden(inicial = { k: '', dir: 1 }) {
   return [th, ordenar];
 }
 
+// Sugerido de reabastecimiento en totes: el traslado "antes del evento" pasado a totes, en orden de prioridad, sin pasar el
+// margen hasta el target de ocupación del OSR (Capacidad del OSR, en Optimización de totes)
+const TONO_SUG = { Completo: 'm-0', Parcial: 'm-2', 'Sin espacio': 'm-4' };
+function SugeridoTotes({ cuerpo, osr }) {
+  const [tote, setTote] = useState('AUTO');
+  const [holgura, setHolgura] = useState(true);
+  const [ver, setVer] = useState('sku');
+  const target = leerTarget() || 85;
+  const [r, cargando] = useSimulacion('/api/optimizacion/abastecimiento/totes', { ...cuerpo, target, tote, holgura }, [JSON.stringify(cuerpo), target, tote, holgura]);
+  if (!r) return <p className="note">{cargando ? 'Calculando el sugerido en totes…' : ''}</p>;
+  if (r.sinCapacidad) return <div className="alert warn">Para el sugerido en totes falta la capacidad del {osr} por línea de rack. <IrACarga id="osrcap" etiqueta="Cargar capacidad (en Datos)" /></div>;
+  if (r.sinProyeccion) return null;
+  const t = r.tot;
+  const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
+  const usoPct = t.margen ? t.totesSug / t.margen : 0;
+  const csv = () => {
+    const filas = ver === 'sku'
+      ? [['Prioridad', 'Clase', 'SKU', 'Descripción', 'Depto', `En ${osr}`, 'Totes hoy', 'Capacidad tote', 'Espacio libre en sus totes', 'A subir', 'Totes necesarios', 'Sugerido', 'En espacio libre', 'Totes sugeridos', 'Almacenamiento', 'Posiciones acumuladas', 'Queda sin subir', 'Estado'],
+        ...r.filas.map((x) => [x.prioridad, x.matriz, x.sku, x.desc, x.depto, x.osr, x.totesHoy, x.cap, x.holgura, x.subir, x.totesNec, x.sug, x.enHolgura, x.totesSug, x.almac, Math.round(x.acumulado * 100) / 100, x.queda, x.estado])]
+      : [['Nro', 'CD origen', 'Ubicación', 'SKU', 'Descripción', 'Unid. a mover', 'Stock al retirar', 'Saldo', 'Prior. SKU'],
+        ...r.picking.map((l) => [l.nro, l.cd, l.ubic, l.sku, l.desc, l.unidades, l.stockAntes, l.saldo, l.prioridad])];
+    const txt = filas.map((f) => f.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/csv;charset=utf-8' }));
+    a.download = ver === 'sku' ? 'sugerido_totes_osr.csv' : 'sugerido_totes_traslado.csv';
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  return (
+    <>
+      <div className="row" style={{ alignItems: 'flex-end', gap: 12, margin: '0 0 10px', flexWrap: 'wrap' }}>
+        <div><label className="lbl" htmlFor="st-tote">Almacenamiento</label>
+          <select id="st-tote" value={tote} onChange={(e) => setTote(e.target.value)}>
+            <option value="AUTO">Automático (enteros + half / quarter)</option><option value="ENTERO">Tote entero</option><option value="HALF">Half</option><option value="QUARTER">Quarter</option></select></div>
+        <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={holgura} onChange={(e) => setHolgura(e.target.checked)} /> Llenar primero el espacio libre de los totes que el SKU ya tiene en {osr}</label>
+        {cargando && <span className="note">Calculando…</span>}
+      </div>
+      <div className="grid-kpi kpi-linea">
+        {tile('Margen hasta el target', fmt(t.margen), 'good', `posiciones libres hasta el ${fmt(t.target * 100, 0)}% (Capacidad del ${osr})`)}
+        {tile('Posiciones que pide el reabasto', fmt(t.totesNec), t.totesNec > t.margen ? 'bad' : '', `${fmt(t.subir)} u. a subir antes del evento · ${fmt(t.skus)} SKU`)}
+        {tile('Sugerido', `${fmt(t.sug)} u.`, 'good', `${fmt(t.completos)} SKU completos${t.parciales ? ` · ${fmt(t.parciales)} parciales` : ''}${t.sinEspacio ? ` · ${fmt(t.sinEspacio)} sin espacio` : ''}`)}
+        {tile('Totes nuevos (posiciones)', fmt(t.totesSug), 'good', `${pct(usoPct, 0)} del margen · sobran ${fmt(t.sobranPos)}`)}
+        {tile('En espacio libre de sus totes', `${fmt(t.enHolgura)} u.`, '', 'no ocupan posiciones nuevas')}
+        {tile('Ocupación después', pct(t.ocupDespues, 1), t.ocupDespues > t.target ? 'bad' : 'good', `hoy ${pct(t.ocupHoy, 1)} · target ${pct(t.target, 0)}`)}
+        {tile('Queda sin subir', `${fmt(t.queda)} u.`, t.queda ? 'warn' : '', t.queda ? 'no caben sin pasar el target' : 'todo el reabasto cabe')}
+      </div>
+      <ul className="lista-lectura">
+        <li>{t.totesNec <= t.margen
+          ? `Todo el reabasto cabe: ${fmt(t.subir)} u. en ${fmt(t.totesNec)} totes nuevos, de un margen de ${fmt(t.margen)} posiciones; quedan ${fmt(t.sobranPos)} libres bajo el target.`
+          : `El reabasto pide ${fmt(t.totesNec)} totes nuevos y el margen es de ${fmt(t.margen)}: se sugiere subir ${fmt(t.sug)} de ${fmt(t.subir)} u., en orden de prioridad, hasta completar el margen.`}</li>
+        {t.sobranPos > 0 && String(cuerpo.ssFuera) !== '0' && <li>Si sobran posiciones, el tope está en el stock de seguridad que se deja fuera de {osr}: bajarlo (arriba, en Abastecimiento) sube más unidades, y el sugerido sigue sin pasar el target.</li>}
+        <li>Cada SKU llena primero su espacio libre (capacidad del tote − unidades que ya tiene) y el resto va a totes nuevos{tote === 'AUTO' ? ': enteros llenos y half / quarter para el resto' : ''}. Capacidad del tote: percentil 90 de las unidades por tote del depto en {osr} (general {fmt(r.conf.capGlobal)} u.).</li>
+      </ul>
+      <div className="row spread" style={{ margin: '10px 0 8px' }}>
+        <div className="chips"><button className="chip" aria-pressed={ver === 'sku'} onClick={() => setVer('sku')}>Por SKU · {fmt(r.total)}</button>
+          <button className="chip" aria-pressed={ver === 'pick'} onClick={() => setVer('pick')}>Lista de traslado del sugerido · {fmt(r.lineasTotal)} líneas</button></div>
+        <button className="btn sm" onClick={csv}>Descargar CSV</button>
+      </div>
+      {ver === 'sku' ? (
+        <Tabla compacta total={r.total} n={r.filas.length}
+          enc={['Prior.', 'Clase', 'SKU / descripción', `En ${osr}`, 'Totes hoy', 'Cap. tote', 'Libre en sus totes', 'A subir', 'Totes necesarios', 'Sugerido', 'Totes sugeridos', 'Posiciones acum.', 'Estado']}
+          num={[0, 3, 4, 5, 6, 7, 8, 9, 10, 11]}
+          filas={r.filas.map((x) => [x.prioridad, <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span>,
+            <><span className="mono">{x.sku}</span> {x.desc}<div className="note" style={{ margin: 0 }}>{x.depto}</div></>,
+            fmt(x.osr), fmt(x.totesHoy, x.totesHoy % 1 ? 2 : 0), fmt(x.cap), x.holgura ? fmt(x.holgura) : '—', fmt(x.subir),
+            <>{fmt(x.totesNec, x.totesNec % 1 ? 2 : 0)}{x.almacNec && <div className="note" style={{ margin: 0 }}>{x.almacNec}</div>}</>,
+            <b>{fmt(x.sug)}</b>, <>{fmt(x.totesSug, x.totesSug % 1 ? 2 : 0)}{x.almac && <div className="note" style={{ margin: 0 }}>{x.almac}</div>}</>,
+            fmt(x.acumulado, 1), <span className={'pill ' + TONO_SUG[x.estado]}>{x.estado}</span>])} />
+      ) : (
+        <Tabla total={r.lineasTotal} n={r.picking.length}
+          enc={['Nro', 'CD origen', 'Ubicación', 'SKU', 'Descripción', 'Unid. a mover', 'Stock al retirar', 'Saldo', 'Prior. SKU']}
+          num={[0, 5, 6, 7, 8]}
+          filas={r.picking.map((l) => [l.nro, l.cd, <span className="mono">{l.ubic}</span>, <span className="mono">{l.sku}</span>, l.desc, <b>{fmt(l.unidades)}</b>, fmt(l.stockAntes), fmt(l.saldo), l.prioridad])} />
+      )}
+      <p className="note">Totes necesarios = posiciones nuevas que pide todo lo que hay que subir del SKU (fracciones: half = 0,5 y quarter = 0,25, que se comparten con otros SKU). Posiciones acum. = totes nuevos sumados en orden de prioridad: el sugerido se corta al llegar al margen hasta el target. El margen y el target son los de Capacidad del {osr} (Optimización de totes).</p>
+    </>
+  );
+}
+
 function ReabastoProyeccion() {
   const [f, setF] = useState({ pctOsr: '', colchon: '', olas: '', minimo: '', logOsr: '', ssFuera: '', minTras: '', umbralRecall: '', incluirNoAptos: false, estado: '', depto: '' });
   const [rec, setRec] = useState(0);
@@ -463,7 +541,7 @@ function ReabastoProyeccion() {
   const osr = r?.osr || 'OSR';
   const g = r?.g, c = r?.conf;
   const excel = urlApi('/api/optimizacion/abastecimiento/excel' + qs({ pctOsr: cuerpo.pctOsr, colchon: cuerpo.colchon, olas: f.olas, minimo: f.minimo, logOsr: f.logOsr, ssFuera: f.ssFuera, minTras: f.minTras, umbralRecall: f.umbralRecall === '' ? '' : Number(f.umbralRecall) / 100, incluirNoAptos: f.incluirNoAptos ? '1' : '' }));
-  const estados = !r?.proy ? [] : vista === 'det' ? r.estadosDet.map((x) => [x.e, x.n]) : vista === 'no' ? r.estadosNo.map((x) => [x.e, x.n]) : vista === 'esp' ? [] : r.ab.porEstado.filter((x) => x.skus).map((x) => [x.estado, x.skus]);
+  const estados = !r?.proy ? [] : vista === 'det' ? r.estadosDet.map((x) => [x.e, x.n]) : vista === 'no' ? r.estadosNo.map((x) => [x.e, x.n]) : vista === 'esp' || vista === 'totes' ? [] : r.ab.porEstado.filter((x) => x.skus).map((x) => [x.estado, x.skus]);
   const cambiarVista = (v) => { setVista(v); if (f.estado) setF({ ...f, estado: '' }); };
   // participación del depto en la proyección total y en el stock actual del OSR (de los deptos proyectados)
   const totOsrDep = (r?.deptos || []).reduce((t, x) => t + x.osrStock, 0);
@@ -537,7 +615,7 @@ function ReabastoProyeccion() {
 
           <div className="row spread" style={{ margin: '14px 0 8px' }}>
             <div className="chips">{VISTAS_RP.map(([k, t]) => <button key={k} className="chip" aria-pressed={vista === k} onClick={() => cambiarVista(k)}>{t}</button>)}</div>
-            {(vista === 'ab' || vista === 'pick' || vista === 'esp') && <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+            {(vista === 'ab' || vista === 'pick' || vista === 'esp' || vista === 'totes') && <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
               <div><label className="lbl" htmlFor="rp-ss">Stock de seguridad fuera de {osr} (u. por SKU)</label>
                 <input id="rp-ss" type="number" className="w90" min="0" placeholder={fmt(r.ab.tot.ss)} value={f.ssFuera} onChange={(e) => setF({ ...f, ssFuera: e.target.value, estado: '' })} /></div>
               {vista !== 'esp' && <div><label className="lbl" htmlFor="rp-mt">Mínimo a trasladar por SKU (u.)</label>
@@ -617,6 +695,7 @@ function ReabastoProyeccion() {
               </>
             );
           })()}
+          {vista === 'totes' && <SugeridoTotes cuerpo={cuerpo} osr={osr} />}
           {vista === 'pick' && (
             <Tabla total={r.ab.lineas} n={r.ab.picking.length}
               enc={['Nro', 'Ola', 'CD origen', 'Ubicación', 'SKU', 'Descripción', 'Unid. a mover', 'Stock al retirar', 'Saldo', 'Prior. SKU']}
@@ -672,7 +751,7 @@ function PotencialOsr() {
         <h2 style={{ margin: 0 }}>Potencial fuera de {osr}</h2>
         {r && <a className="btn primary" href={excel}>Exportar a Excel</a>}
       </div>
-      <p className="note" style={{ marginTop: -2 }}>SKU con stock en los demás CD que, por su clase ABC / XYZ, conviene llevar a {osr}. Elige las clases en la matriz y acota el escenario con los filtros: aptitud, stock fuera mínimo, venta diaria, CD de origen y días de cobertura (tope de lo que se ingresa = venta diaria x días; vacío = todo lo disponible). Siempre queda fuera de {osr} un stock de seguridad (días de venta, con un mínimo de unidades): solo se ingresa lo que sobra, tomado de las ubicaciones con más unidades. Con un máximo de SKU entran los de mayor prioridad (clase A y más venta). Con un evento del simulador, los deptos con mayor factor del evento van primero y la cobertura usa la venta del evento. No se considera el stock de {r?.buffer?.join(' / ') || 'RCI'} (buffer de reabastecimiento). Cada ubicación de {osr} es un tote de un SKU; en half o quarter el tote se divide en 2 o 4 compartimentos. La capacidad de un tote entero se estima por depto con el percentil 90 de sus totes actuales en {osr} (o la que escribas). Venta diaria = ventas de 2 meses / 60.</p>
+      <p className="note" style={{ marginTop: -2 }}>SKU con stock en los demás CD que, por su clase ABC / XYZ, conviene llevar a {osr}. Elige las clases en la matriz y acota el escenario con los filtros: aptitud, stock fuera mínimo, venta diaria, CD de origen y días de cobertura (tope de lo que se ingresa = venta diaria x días; vacío = todo lo disponible). Siempre queda fuera de {osr} un stock de seguridad (días de venta, con un mínimo de unidades): solo se ingresa lo que sobra, tomado de las ubicaciones con más unidades. Con un máximo de SKU entran los de mayor prioridad (clase A y más venta). Con un evento del simulador, los deptos con mayor factor del evento van primero y la cobertura usa la venta del evento. {r && !r.buffer?.length ? `El stock de ${r.cdsBuffer?.join(' / ') || 'RCI'} (buffer de reabastecimiento) se considera porque está elegido como CD de origen.` : `No se considera el stock de ${r?.buffer?.join(' / ') || 'RCI'} (buffer de reabastecimiento) salvo que lo elijas en CD de origen.`} Cada ubicación de {osr} es un tote de un SKU; en half o quarter el tote se divide en 2 o 4 compartimentos. La capacidad de un tote entero se estima por depto con el percentil 90 de sus totes actuales en {osr} (o la que escribas). Venta diaria = ventas de 2 meses / 60.</p>
       {r && !r.hayCol && <div className="alert warn">La Base no trae la columna "Logística OSR": todos los SKU cuentan como aptos.</div>}
 
       <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,auto) minmax(0,1fr)', alignItems: 'start' }}>
@@ -719,7 +798,8 @@ function PotencialOsr() {
           <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.soloDeptosOsr} onChange={(e) => setF({ ...f, soloDeptosOsr: e.target.checked, depto: '' })} /> Solo deptos {osr}</label>
           {r && <div>
             <span className="lbl">CD de origen</span>
-            <div className="chips">{r.cds.map((cd) => <button key={cd} className="chip" aria-pressed={f.cds.includes(cd)} onClick={() => alt('cds', cd)}>{cd}</button>)}
+            <div className="chips">{r.cds.map((cd) => <button key={cd} className="chip" aria-pressed={f.cds.includes(cd)} onClick={() => alt('cds', cd)}
+              title={r.cdsBuffer?.includes(cd) ? 'CD buffer: solo se considera su stock si lo eliges' : undefined}>{cd}{r.cdsBuffer?.includes(cd) ? ' (buffer)' : ''}</button>)}
               {f.cds.length > 0 && <button className="chip" onClick={() => set('cds')([])}>Todos ✕</button>}</div>
           </div>}
           {cargando && <span className="note">Calculando…</span>}
@@ -728,7 +808,7 @@ function PotencialOsr() {
 
       {r && t && (
         <>
-          <div className="grid-kpi" style={{ marginTop: 14 }}>
+          <div className="grid-kpi kpi-linea" style={{ marginTop: 14 }}>
             {tile('SKU a ingresar', fmt(t.skus), 'good', `${r.conf.maxSkus && t.fueraTope ? `máximo ${fmt(r.conf.maxSkus)} de ${fmt(t.candidatos)} candidatos (${fmt(t.ingresarTope)} u. quedan fuera del tope) · ` : ''}clases ${r.conf.clases.join(', ')}${t.porSS ? ` · ${fmt(t.porSS)} SKU sin disponible sobre el stock de seguridad` : ''}`)}
             {tile(`A ingresar a ${osr}`, `${fmt(t.ingresar)} u.`, 'good', `de ${fmt(t.fuera)} u. fuera · quedan fuera ${fmt(t.queda)} u. (stock de seguridad ${fmt(t.ss)} u.)${r.conf.dias ? ` · tope ${r.conf.dias} días de venta` : ''}`)}
             {tile('Ubicaciones de origen', fmt(t.ubic), '', r.porCd.map((c) => `${c.cd} ${fmt(c.unidades)} u.`).join(' · ') || '—')}

@@ -619,6 +619,14 @@ export async function simularAbastecimiento(params = {}) {
   };
 }
 
+/** Reabasto con su lista de traslado (la usa el sugerido en totes); ab = null sin proyección */
+export async function reabastoYTraslado(params = {}) {
+  const r = await reabasto(params);
+  if (r.sinProyeccion) return { r, ab: null };
+  const incluir = params.incluirNoAptos === true || params.incluirNoAptos === '1';
+  return { r, ab: abastecer(r.detalle, r.noAptos, incluir, ssDe(params), minDe(params)) };
+}
+
 export async function archivoAbastecimiento(params = {}) {
   const r = await reabasto(params);
   if (r.sinProyeccion) throw Object.assign(new Error('Carga primero la proyección del evento (Pro_Evt).'), { status: 400 });

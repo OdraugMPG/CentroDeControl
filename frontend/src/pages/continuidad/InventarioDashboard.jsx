@@ -78,37 +78,52 @@ function Seg({ valor, opciones, onChange, label }) {
   );
 }
 
-// Qty SKU y Qty unidades: tabla comparativa (correctos, faltante, sobrante) y el detalle por CD
-function SkuUnidades({ r }) {
-  const t = r.tot, skuOk = t.skus - t.skusDif;
-  // [concepto, SKU, % SKU, unidades, % unidades, clase]
-  const filas = [
-    ['Total', N(t.skus), 1, `${N(t.unidSis)} en sistema`, 1, 'tot'],
-    ['Contadas', null, null, N(t.unidCont), div(t.unidCont, t.unidSis)],
-    ['Correctos', N(skuOk), div(skuOk, t.skus), N(t.unidCorr), div(t.unidCorr, t.unidSis), 'ok'],
-    ['Con faltante', N(t.skusFalt), div(t.skusFalt, t.skus), N(t.falt), div(t.falt, t.unidSis), 'warn'],
-    ['Con sobrante', N(t.skusSobr), div(t.skusSobr, t.skus), N(t.sobr), div(t.sobr, t.unidSis)],
-    ['Con diferencia', N(t.skusDif), div(t.skusDif, t.skus), N(t.abs), div(t.abs, t.unidSis), 'warn'],
-    ['Neto (sobrante − faltante)', null, null, signo(t.neto), div(Math.abs(t.neto), t.unidSis)]
-  ];
+// Precisión de la programación de CE: la toma real de CE contra la fecha programada original y la vigente (re-programada)
+const COLOR_PROG = { original: '--green', reprog: '--teal', adelantada: '--blue', atrasada: '--yellow', noTomada: '--red' };
+function PrecisionProgramacion({ desde, hasta, cd, periodo }) {
+  const d = useCarga(() => api.get(`/continuidad/inventario/dashboard/programacion?${new URLSearchParams({ desde, hasta, cd, periodo })}`), [desde, hasta, cd, periodo]);
+  const r = d.data;
+  const titulo = 'Precisión de la programación de CE';
+  if (!r) return <Card title={titulo}><Cargando error={d.error} /></Card>;
+  if (!r.ce) return <Card title={titulo}><p className="empty">Carga la toma de CE (Datos, Cargas de archivos, tarjeta Inventario) para medir la programación contra la toma real.</p></Card>;
+  const t = r.tot, E = r.estados;
+  if (!t.prog) return <Card title={titulo}><p className="empty">Sin ubicaciones programadas en el rango.</p></Card>;
+  const est = Object.keys(COLOR_PROG);
+  const serie = {
+    labels: r.serie.map((x) => etqPeriodo(x.p, r.periodo)),
+    datasets: est.map((k) => ({ label: E[k], data: r.serie.map((x) => x.est[k]), backgroundColor: css(COLOR_PROG[k]), borderRadius: 3, borderSkipped: false, maxBarThickness: 38 }))
+  };
+  const desf = {
+    labels: r.desfase.map((x) => (x.d === 0 ? 'En fecha' : `${x.d <= -3 ? '≤ ' : x.d >= 3 ? '≥ ' : ''}${x.d > 0 ? '+' : ''}${x.d} d`)),
+    datasets: [{ label: 'Ubicaciones', data: r.desfase.map((x) => x.n), backgroundColor: r.desfase.map((x) => css(x.d === 0 ? '--green' : x.d < 0 ? '--blue' : '--yellow')), borderRadius: 4, borderSkipped: false, maxBarThickness: 40 }]
+  };
+  const kpi = (k, v, n, cls = '') => <div className="kpi"><dt>{k}</dt><dd className={cls}>{v}</dd>{n && <small className="muted" style={{ display: 'block', fontSize: 12 }}>{n}</small>}</div>;
   return (
-    <Card title="Análisis en Qty SKU y Qty unidades" hint="Un SKU está correcto si en todas sus ubicaciones el conteo cuadra con el sistema; un SKU puede tener faltante en una ubicación y sobrante en otra, por eso faltante + sobrante puede sumar más que el total. Los % de unidades son sobre las unidades en sistema.">
-      <div className="tscroll"><table className="dash-cmp-tabla">
-        <thead><tr><th>Concepto</th><th className="num">Qty SKU</th><th className="num">% SKU</th><th className="num">Qty unidades</th><th className="num">% unidades</th></tr></thead>
-        <tbody>{filas.map(([c, s, ps, u, pu, cls]) => (
-          <tr key={c} className={cls === 'tot' ? 'tot' : ''}>
-            <th scope="row">{c}</th>
-            <td className={`num ${cls === 'warn' && s !== '0' ? 'warn' : ''}`}>{s ?? <span className="muted">—</span>}</td><td className="num muted">{ps === null ? '—' : pctf(ps)}</td>
-            <td className={`num ${cls === 'warn' && u !== '0' ? 'warn' : ''}`}>{u}</td><td className="num muted">{pctf(pu)}</td>
-          </tr>))}</tbody>
-      </table></div>
-      <h4 className="dash-sub" style={{ marginTop: 14 }}>Por CD</h4>
-      <TablaOrden filas={r.porCd.map((x) => ({ ...x, pSkuOk: div(x.skus - x.skusDif, x.skus) }))} inicial={['unidSis', -1]} clave={(x) => x.v} cols={[
-        ['v', 'CD'], ['skus', 'Qty SKU', true, N], ['pSkuOk', '% SKU correctos', true, pctf], ['skusDif', 'SKU con dif.', true, N],
-        ['unidSis', 'Unid. sistema', true, N], ['unidCont', 'Unid. contadas', true, N], ['falt', 'Faltante', true, (v) => <span className={v ? 'warn' : ''}>{N(v)}</span>], ['sobr', 'Sobrante', true, N],
-        ['neto', 'Neto', true, signo],
-        ['eri', 'ERI', true, (v) => <Indicador v={v} sano={r.param.eriSano} critico={r.param.eriCritico} />],
-        ['eru', 'ERU', true, (v) => <Indicador v={v} sano={r.param.eruSano} critico={r.param.eruCritico} />]]} />
+    <Card title={titulo} hint={`Cada ubicación programada (por su fecha programada original) contra la toma real de CE más cercana a su fecha vigente. Se evalúan las que tienen la toma de CE de su fecha cargada (${N(r.ce.dias)} ${r.ce.dias === 1 ? 'día' : 'días'} de toma de CE, del ${dmy(r.ce.desde)} al ${dmy(r.ce.hasta)}); el resto queda sin evaluar.`}>
+      <dl className="kpis" style={{ marginTop: 0 }}>
+        {kpi('Accuracy programación original', pctf(t.accOrig), `${N(t.enOrig)} de ${N(t.evaluables)} tomadas en la fecha programada`)}
+        {kpi('Accuracy con re-programación', pctf(t.accVig), `${N(t.enVig)} tomadas en la fecha vigente`)}
+        {kpi('Cumplimiento', pctf(t.cumpl), `tomadas en cualquier fecha (±30 d)`)}
+        {kpi('Re-programadas', pctf(t.pReprog), `${N(t.reprog)} de ${N(t.prog)} · ${t.diasReprog === null ? '—' : t.diasReprog.toFixed(1).replace('.', ',')} d en promedio`)}
+        {kpi('Efectividad re-programación', pctf(t.efReprog), `${N(t.reprogEnNueva)} de ${N(t.reprogEval)} tomadas en la nueva fecha`)}
+        {kpi('No tomadas', N(t.est.noTomada), `${N(r.noProg)} tomas de CE sin programar`, t.est.noTomada ? 'warn' : '')}
+      </dl>
+      <div className="grid" style={{ marginTop: 12 }}>
+        <div className="s8">
+          <h4 className="dash-sub">Ubicaciones por {r.periodo === 'dia' ? 'día' : r.periodo} programado</h4>
+          <Grafico apilado alto={260} label="Resultado de la programación por período" datos={serie}
+            opciones={{ plugins: { tooltip: { callbacks: { footer: (it) => { const x = r.serie[it[0].dataIndex]; return `Accuracy original ${pctf(x.accOrig)} · con re-programación ${pctf(x.accVig)}${x.est.pendiente ? ` · ${N(x.est.pendiente)} sin toma de CE cargada` : ''}`; } } } } }} />
+        </div>
+        <div className="s4">
+          <h4 className="dash-sub">Desfase de la toma real vs la fecha vigente</h4>
+          <Grafico alto={260} leyenda={false} label="Desfase en días de la toma real de CE" datos={desf} />
+        </div>
+      </div>
+      <h4 className="dash-sub" style={{ marginTop: 12 }}>Por zona</h4>
+      <TablaOrden filas={r.porZona.map((z) => ({ ...z, noTomadas: z.est.noTomada }))} inicial={['prog', -1]} clave={(x) => x.zona} cols={[
+        ['zona', 'Zona'], ['prog', 'Programadas', true, N], ['evaluables', 'Evaluadas', true, N], ['accOrig', 'Accuracy original', true, pctf], ['accVig', 'Accuracy con re-prog.', true, pctf],
+        ['cumpl', 'Cumplimiento', true, pctf], ['pReprog', '% re-programadas', true, pctf], ['efReprog', 'Efectividad re-prog.', true, pctf],
+        ['noTomadas', 'No tomadas', true, (v) => <span className={v ? 'warn' : ''}>{N(v)}</span>]]} />
     </Card>
   );
 }
@@ -501,8 +516,8 @@ export default function InventarioDashboard() {
         <Tarjetas r={r} enValor={enValor} />
         <p className="hint" style={{ marginTop: 6 }}>YTD {+r.comp.ant.hasta.slice(0, 4)} = el mismo rango de fechas (toma desde – hasta) del año anterior, del {dmy(r.comp.ant.desde)} al {dmy(r.comp.ant.hasta)}. La variación es del rango de este año frente al del año anterior, en puntos porcentuales de la tasa (verde mejora, rojo empeora).</p>
         <div className="grid" style={{ marginTop: 12 }}>
-          <div className="s12"><SkuUnidades r={r} /></div>
           <div className="s12"><Historico r={r} /></div>
+          <div className="s12"><PrecisionProgramacion desde={desde} hasta={hasta} cd={cd} periodo={periodo} /></div>
           <div className="s12"><Resultado r={r} enValor={enValor} setEnValor={setEnValor} /></div>
           <div className="s12"><Match r={r} enValor={enValor} /></div>
           <div className="s12"><ConteosTurnos r={r} enValor={enValor} /></div>

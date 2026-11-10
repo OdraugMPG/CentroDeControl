@@ -11,14 +11,18 @@ export const MODULOS = [
     ['/mapa', 'Pedidos por región', 'op.mapa'], ['/olas', 'Simulador de olas', 'op.olas']]],
   ['gd', 'Gestión diaria', [
     ['/gestion', 'Asignación del día', 'gd.asignacion'], ['/gestion/tareas', 'Tareas', 'gd.tareas'], ['/gestion/conciliacion', 'Conciliación', 'gd.conciliacion'],
-    ['/gestion/turno', 'Mi turno', 'gd.turno'], ['/gestion/cierre', 'Cierre por tareas', 'gd.cierre'], ['/gestion/slow', 'Slow moving', 'gd.slow'],
-    ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'], ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion']]],
+    ['/gestion/turno', 'Mi turno', 'gd.turno'], ['/gestion/cierre', 'Cierre por tareas', 'gd.cierre']]],
+  // Sloting: las vistas siguen en /gestion y con sus permisos de Gestión diaria
+  ['slot', 'Sloting', [
+    ['/gestion/slow', 'Slow moving', 'gd.slow'], ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'],
+    ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion']]],
   ['cont', 'Continuidad', [
     ['/continuidad', 'Panel', 'co.panel'], ['/continuidad/turno', 'Mi turno', 'co.turno'], ['/continuidad/calendario', 'Calendario', 'co.calendario'],
     ['/continuidad/asignar', 'Asignar', 'co.asignar'], ['/continuidad/equipo', 'Equipo', 'co.equipo'], ['/continuidad/dotacion', 'Dotación', 'co.dotacion'],
     ['/continuidad/indicadores', 'Indicadores', 'co.indicadores']]],
   ['inv', 'Gestión de inventario', [
     ['/inventario/dashboard', 'Dashboard', 'co.inventario.dashboard'], ['/inventario/validacion', 'Validación de la toma', 'co.inventario.validacion'],
+    ['/inventario/comparacion', 'Toma CE vs operación', 'co.inventario.comparacion'],
     ['/inventario', 'Inventario CD', 'co.inventario'], ['/inventario/calendario', 'Calendario de planificación', 'co.inventario.calendario']]],
   ['cfg', 'Datos', [['/cargas', 'Cargas de archivos', 'da.cargas', CARGAS], ['/configuracion', 'Metas y calendario', 'da.configuracion']]],
   ['adm', 'Administración', [['/admin/usuarios', 'Usuarios', 'ad.usuarios'], ['/admin/roles', 'Roles y permisos', 'ad.usuarios'],

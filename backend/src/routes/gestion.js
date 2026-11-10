@@ -9,7 +9,7 @@ import { leerParametros, guardarParametros, DEFAULTS } from '../gestion/services
 import { guardarCarga } from '../gestion/services/stock.js';
 import { generarAsignacion } from '../gestion/services/asignacion.js';
 import { listarTareas, actualizarTarea, cierreConStock, kpi, archivoTurno, archivoWms, importarAvances } from '../gestion/services/tareas.js';
-import { opciones, simularSlow, generarColaSlow, colaSlow, vaciarColaSlow, cargarListadoSlow, borrarListadoSlow, validarListadoSlow, archivoListadoSlow } from '../gestion/services/slow.js';
+import { opciones, simularSlow, archivoSlow, generarColaSlow, colaSlow, vaciarColaSlow, cargarListadoSlow, borrarListadoSlow, validarListadoSlow, archivoListadoSlow } from '../gestion/services/slow.js';
 import { abcXyz, guardarAbcXyz, cargarHistoria, borrarHistoria } from '../gestion/services/abcXyz.js';
 import { optimizacion, generarReasignacion, simularOsr, generarIngresoOsr, consolidacionCds, archivoConsolidacionCds,
   consolidacionInterna, archivoConsolidacionInterna } from '../gestion/services/optimizacion.js';
@@ -17,6 +17,7 @@ import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbast
 import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
+import { sugeridoTotes } from '../gestion/services/reabastoTotes.js';
 import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr, cargarCapacidadOsr, borrarCapacidadOsr, capacidadOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
@@ -113,6 +114,8 @@ app.get('/archivos/wms', r(async (req, res) => enviarXlsx(res, await archivoWms(
 // ---- slow moving
 app.get('/slow/opciones', r(() => opciones()));
 app.post('/slow/simular', r((req) => simularSlow(req.body || {})));
+// Excel del simulador: los filtros van en la URL (JSON) para descargarlo con un enlace
+app.get('/slow/excel', r(async (req, res) => { let f = {}; try { f = JSON.parse(req.query.filtros || '{}'); } catch { /* filtros inválidos: sin filtros */ } enviarXlsx(res, await archivoSlow(f)); }));
 app.post('/slow/generar', r((req) => generarColaSlow(req.body?.filtros || {}, req.body?.destino)));
 app.get('/slow/cola', r(() => colaSlow()));
 app.post('/slow/validar', subir.single('archivo'), r(async (req) => {
@@ -165,6 +168,7 @@ app.post('/optimizacion/abastecimiento/proyeccion/borrar', r(() => borrarProyecc
 app.post('/optimizacion/abastecimiento/proyeccion/versiones', r((req) => versionesProyeccion(req.body || {})));
 app.post('/optimizacion/abastecimiento/proyeccion/activar', r((req) => activarVersionProyeccion(req.body?.id)));
 app.post('/optimizacion/abastecimiento/simular', r((req) => simularAbastecimiento(req.body || {})));
+app.post('/optimizacion/abastecimiento/totes', r((req) => sugeridoTotes(req.body || {})));
 app.get('/optimizacion/abastecimiento/excel', r(async (req, res) => enviarXlsx(res, await archivoAbastecimiento({ ...req.query, incluirNoAptos: req.query.incluirNoAptos === '1' }))));
 app.post('/participacion/venta', subir.single('archivo'), r(async (req) => {
   if (!req.file) throw Object.assign(new Error('Adjunta el archivo de venta.'), { status: 400 });

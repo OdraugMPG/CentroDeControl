@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, fmt, fFecha, urlApi } from './api.js';
+import { api, fmt, fFecha, urlApi, qs } from './api.js';
 import { toast, useCarga, IrACarga } from './ui.jsx';
 
 /** Desplegable que se cierra al hacer clic fuera o con Escape. */
@@ -250,6 +250,7 @@ function Slow() {
                 <div><label className="lbl" htmlFor="s-d">Destino</label><input id="s-d" type="text" value={destino} onChange={(e) => setDestino(e.target.value)} /></div>
                 <button className={'btn primary' + (confirmar ? ' danger' : '')} disabled={!r.filas} onClick={generar}>{confirmar ? `Confirmar ${fmt(r.total.ubicaciones)} tareas` : `Generar tareas (${fmt(r.total.ubicaciones)} ubicaciones)`}</button>
                 {confirmar && <button className="btn" onClick={() => setConfirmar(false)}>Cancelar</button>}
+                <a className={'btn' + (r.filas ? '' : ' disabled')} aria-disabled={!r.filas} href={r.filas ? urlApi('/api/slow/excel' + qs({ filtros: JSON.stringify(f) })) : undefined}>Exportar a Excel</a>
               </div>
             </div>
             {confirmar && <div className="alert warn">Vas a dejar {fmt(r.total.ubicaciones)} tareas de extracción en cola para la próxima asignación. Acota los criterios si es demasiado para un turno.</div>}
@@ -262,7 +263,7 @@ function Slow() {
                 ))}</tbody>
               </table>
             </div>
-            {r.filas > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filas)} SKU (ordenados por mes y valor).</p>}
+            {r.filas > r.detalle.length && <p className="note">Se muestran {fmt(r.detalle.length)} de {fmt(r.filas)} SKU (ordenados por mes y valor). El Excel trae todos con cada ubicación.</p>}
           </div>
         </>
       )}

@@ -34,6 +34,22 @@ export async function simularSlow(filtros, limite = 500) {
   return { carga: d.carga, total: r.total, porCD: r.porCD, filas: r.seleccion.length, detalle: r.seleccion.slice(0, limite).map(({ filas, ...x }) => x), cola };
 }
 
+/** Excel del simulador con los filtros aplicados: todos los SKU (no solo los que muestra la vista) y sus ubicaciones. */
+export async function archivoSlow(filtros = {}) {
+  const d = await detalle();
+  const r = simular(d.detalle, filtros);
+  const fecha = d.carga.fecha instanceof Date ? d.carga.fecha.toISOString().slice(0, 10) : String(d.carga.fecha).slice(0, 10);
+  const sku = [['Mes almac.', 'CD', 'SKU', 'Descripción', 'Depto', 'Temporada', 'Unidades', 'Ventas', 'Días último almac.', 'Valor', 'Tramo', 'Ubicaciones', 'Libera', 'Lista de ubicaciones'],
+    ...r.seleccion.map((x) => [x.mes, x.cd, x.sku, x.desc, x.depto, x.temporada, x.uni, x.ventas, x.dias ?? '', Math.round(x.valor), x.tramoNom, x.nUb, x.libera, x.ubic.join(', ')])];
+  const ubic = [['CD', 'SKU', 'Descripción', 'Depto', 'Temporada', 'Mes almac.', 'Piso', 'Zona pasillo', 'Ubicación', 'Unidades', 'Tramo'],
+    ...r.seleccion.flatMap((x) => x.filas.map((f) => [x.cd, x.sku, x.desc, x.depto, x.temporada, x.mes, f.piso || '', f.zp || '', f.ubic || '', f.qty, x.tramoNom]))];
+  const cd = [['CD', 'SKU', 'Unidades', 'Valor', 'Ubicaciones', 'Libera'], ...r.porCD.map((c) => [c.cd, c.skus, c.unidades, Math.round(c.valor), c.ubicaciones, c.libera])];
+  return {
+    buffer: libro([['Por SKU', sku, [10, 10, 14, 36, 26, 18, 10, 9, 10, 12, 20, 11, 8, 40]], ['Por ubicación', ubic, [10, 14, 36, 26, 18, 10, 8, 12, 18, 10, 20]], ['Por CD', cd, [12, 9, 11, 14, 12, 9]]]),
+    nombre: 'SlowMoving_' + fecha + '.xlsx',
+  };
+}
+
 /** Deja en cola una tarea por ubicación de cada SKU seleccionado; entran a la próxima asignación diaria. */
 export async function generarColaSlow(filtros, destino) {
   const d = await detalle();

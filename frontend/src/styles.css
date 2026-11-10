@@ -350,6 +350,20 @@ textarea.sum{min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospa
 .appbar .tema{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35)}
 .appbar .tema button{color:rgba(255,255,255,.85)}
 .appbar .tema button[aria-pressed="true"]{background:#fff;color:var(--barra1)}
+.tema-i,.reloj-i{display:none}
+/* pantallas anchas: título, módulos y controles en una sola línea (el tema solo con íconos y el reloj corto) */
+@media (min-width:1100px){
+  .appbar .in{flex-wrap:nowrap;gap:12px}
+  .appbar .in h1{font-size:clamp(22px,1.9vw,30px);white-space:nowrap}
+  .brand{flex-wrap:nowrap;gap:10px;min-width:0}
+  .modnav{flex-wrap:nowrap}
+  .modnav a{padding:6px 9px;font-size:13.5px;white-space:nowrap}
+  .appbar .live{flex-wrap:nowrap;flex-shrink:0;gap:8px;font-size:13px;white-space:nowrap}
+  .appbar .live .ghost{padding:4px 10px}
+  .tema-t,.reloj-t{display:none}
+  .tema-i,.reloj-i{display:inline}
+  .tema button{padding:3px 8px;min-width:26px}
+}
 .subnav{padding-top:4px}
 .subnav a.active{color:var(--blue);border-color:var(--blue)}
 .btn{background:var(--blue);color:#fff;border-radius:8px}
@@ -422,6 +436,19 @@ input[type=text],input[type=number],input[type=date],input[type=search],select,t
 .cal-inv-g:hover,.cal-inv-g.act{background:color-mix(in srgb,var(--blue) 14%,var(--panel))}
 .cal-inv-g:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
 @media (max-width:760px){.cal-inv{grid-template-columns:repeat(7,minmax(84px,1fr));overflow-x:auto}}
+/* calendario: mes, filtros, leyenda y días de la semana fijos bajo la barra superior al hacer scroll */
+.cal-fijo{position:sticky;top:var(--appbar-h,0px);z-index:5;background:var(--bg);margin:0 -4px;padding:6px 4px 0;box-shadow:0 6px 8px -8px rgba(0,0,0,.35)}
+.cal-fijo .filters{margin-bottom:6px}
+.cal-fijo .top{margin-top:0}
+.cal-inv.cal-inv-sem{margin-bottom:4px}
+/* calendario: ¿la operación inventarió el pasillo? */
+.tom-i{font-style:normal;font-weight:700;font-size:10px;margin-right:4px;padding:0 4px;border-radius:999px;color:#fff}
+.cal-inv-g.tom-ok{background:color-mix(in srgb,var(--green) 13%,var(--bg))}
+.cal-inv-g.tom-ok .tom-i,.tom-ley.t-ok{background:var(--green)}
+.cal-inv-g.tom-parcial .tom-i,.tom-ley.t-parcial{background:var(--yellow);color:#1b1b1b}
+.cal-inv-g.tom-no{background:color-mix(in srgb,var(--red) 10%,var(--bg))}
+.cal-inv-g.tom-no .tom-i,.tom-ley.t-no{background:var(--red)}
+.tom-ley{display:inline-block;color:#fff;border-radius:999px;padding:0 5px;font-size:10.5px;font-style:normal}
 
 /* Dashboard de inventario */
 .seg-inv{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
@@ -498,3 +525,20 @@ input[type=text],input[type=number],input[type=date],input[type=search],select,t
 .val-match .val-m-cd td{background:color-mix(in srgb,var(--blue) 18%,var(--panel));font-weight:700;border-bottom:2px solid var(--ink)}
 /* detalle de la validación: encabezado fino y fijo al hacer scroll */
 .val-det thead th{position:sticky;top:0;z-index:2;background:var(--panel);padding-top:5px;padding-bottom:5px;font-size:12px;line-height:1.2;box-shadow:inset 0 -2px 0 var(--ink);border-bottom:0}
+
+/* Toma CE vs operación */
+.cmp-card{margin-top:12px}
+.cmp-barra{display:flex;height:18px;border-radius:6px;overflow:hidden;gap:2px;background:var(--panel)}
+.cmp-barra span{min-width:3px}
+.cmp-ley{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 16px;font-size:13px}
+.cmp-ley li{display:flex;align-items:center;gap:6px}
+.cmp-ley i,.cmp-pt{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
+.cmp-pt{margin-right:4px;vertical-align:-1px}
+.cmp-ley span{flex:1;color:var(--muted)}
+.cmp-ley small{color:var(--muted);min-width:34px;text-align:right}
+.cmp-lectura{margin:10px 0 0;padding-left:18px;font-size:13px;line-height:1.55}
+.cmp-res{display:inline-block;white-space:nowrap;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
+.cmp-tabla table{table-layout:auto;font-size:13px}
+.cmp-tabla thead th{white-space:normal;vertical-align:bottom;font-size:11.5px;line-height:1.2;padding-left:5px;padding-right:5px}
+.cmp-tabla td{padding:5px}
+.cmp-tabla .cmp-pt{display:block;margin:0 0 3px auto}

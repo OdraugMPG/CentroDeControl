@@ -3,7 +3,7 @@
 // stock fuera mínimo, venta mínima, solo deptos OSR y días de cobertura (tope de lo que se ingresa = venta diaria x días).
 // Siempre queda un stock de seguridad fuera de OSR (días de venta, con un mínimo de unidades): solo se ingresa lo disponible
 // sobre ese stock, tomado de las ubicaciones con más unidades. Un máximo de SKU deja solo los de mayor prioridad (clase A, más venta).
-// El stock de los CD buffer (RCI, parámetro cdsBuffer) no se considera: es reserva de reabastecimiento.
+// El stock de los CD buffer (RCI, parámetro cdsBuffer) no se considera salvo que se elija ese CD como origen: es reserva de reabastecimiento.
 // Con un evento del simulador, cada SKU toma el factor de su depto: los de mayor factor van primero (o solo los de factor > 1)
 // y la cobertura a ingresar usa la venta del evento (venta diaria x factor).
 // Almacenamiento en OSR: cada ubicación de OSR es un tote; se puede dividir en half (2) o quarter (4) compartimentos de un SKU.
@@ -57,7 +57,9 @@ export async function calcularPotencial(params = {}) {
   const listaOsr = deptosPrioritarios(p.deptosOsr);
   const okApt = (a) => apt === 'TODOS' || a === 'Y' || (apt === 'REV' && a === 'REVISION');
   const cdsTodos = new Set();
-  const buffer = new Set(String(p.cdsBuffer || '').split('|').map(up).filter(Boolean));
+  const bufferTodos = String(p.cdsBuffer || '').split('|').map(up).filter(Boolean);
+  // un CD buffer entra solo si se elige explícitamente en CD de origen
+  const buffer = new Set(bufferTodos.filter((cd) => !cdsSel.includes(cd)));
   const evt = await factoresEvento(params.evento || '');
   const conEvt = !!evt.evento;
   const modoEvt = params.evtModo in MODO_EVT ? params.evtModo : 'PRIORIZAR';
@@ -68,7 +70,7 @@ export async function calcularPotencial(params = {}) {
   const universo = [], sinDisp = [];
   for (const x of skus) {
     const origen = x.origen.filter((o) => !buffer.has(up(o.cd)) && (!cdsSel.length || cdsSel.includes(up(o.cd))));
-    for (const o of x.origen) if (!buffer.has(up(o.cd))) cdsTodos.add(up(o.cd));
+    for (const o of x.origen) cdsTodos.add(up(o.cd));
     const fuera = origen.reduce((s, o) => s + o.qty, 0);
     if (!(fuera > 0)) continue;
     const aptitud = aptitudDe(x.log);
@@ -161,7 +163,7 @@ export async function calcularPotencial(params = {}) {
     partAntes: ventaTot ? ventaOsr / ventaTot : 0, partDespues: ventaTot ? (ventaOsr + tot.ventaDia - sale.ventaDia) / ventaTot : 0,
   };
   return {
-    carga, osr, hayCol, cds, noY, balance, buffer: [...buffer], eventos: evt.eventos, evento: evt.evento, evtGeneral: evt.general, conf: { clases: [...sel], aptitud: apt, enOsr, cdsSel, minFuera, minVenta, dias, soloOsr, ssDias, ssMin, maxSkus, evtModo: modoEvt, evtMin, tote: modoTote, capTote, capGlobal: caps.global },
+    carga, osr, hayCol, cds, noY, balance, buffer: [...buffer], cdsBuffer: bufferTodos, eventos: evt.eventos, evento: evt.evento, evtGeneral: evt.general, conf: { clases: [...sel], aptitud: apt, enOsr, cdsSel, minFuera, minVenta, dias, soloOsr, ssDias, ssMin, maxSkus, evtModo: modoEvt, evtMin, tote: modoTote, capTote, capGlobal: caps.global },
     universo: { skus: universo.length, fuera: sum(universo, 'fuera') }, matriz, tot, porCd: [...porCdM.values()].sort((a, b) => b.unidades - a.unidades),
     deptos, elegidos,
   };
