@@ -5,6 +5,7 @@
 // "(en Datos)" de ese módulo y ve solo sus tarjetas (cada tarjeta pide el suyo).
 const CARGAS = ['da.cargas', 'gd.asignacion.base', 'gd.conciliacion', 'gd.abc', 'gd.config', 'gd.osr', 'gd.participacion', 'gd.slow', 'co.inventario.cargar'];
 export const MODULOS = [
+  ['ger', 'Dashboard gerencial', [['/gerencial', 'Dashboard gerencial', 'ge.dashboard']]],
   ['ctl', 'Operación', [
     ['/', 'Resumen', 'op.resumen'], ['/almacenamiento', 'Por almacenar', 'op.almacenamiento'], ['/recepcion', 'Almacenado', 'op.recepcion'],
     ['/pedidos', 'Flujo de pedidos', 'op.pedidos'], ['/control', 'Control por hora', 'op.control'], ['/cierre', 'Cierre de turno', 'op.cierre'],
@@ -23,6 +24,7 @@ export const MODULOS = [
   ['inv', 'Gestión de inventario', [
     ['/inventario/dashboard', 'Dashboard', 'co.inventario.dashboard'], ['/inventario/validacion', 'Validación de la toma', 'co.inventario.validacion'],
     ['/inventario/comparacion', 'Toma CE vs operación', 'co.inventario.comparacion'],
+    ['/inventario/movimientos', 'Movimientos de SKU', 'co.inventario.movimientos'],
     ['/inventario', 'Inventario CD', 'co.inventario'], ['/inventario/calendario', 'Calendario de planificación', 'co.inventario.calendario']]],
   ['cfg', 'Datos', [['/cargas', 'Cargas de archivos', 'da.cargas', CARGAS], ['/configuracion', 'Metas y calendario', 'da.configuracion']]],
   ['adm', 'Administración', [['/admin/usuarios', 'Usuarios', 'ad.usuarios'], ['/admin/roles', 'Roles y permisos', 'ad.usuarios'],
@@ -44,4 +46,5 @@ export function vistaDe(ruta) {
   return mejor;
 }
 
-export const primeraRuta = u => MODULOS.flatMap(m => m[2]).find(v => puede(u, v[2]))?.[0] || null;
+// al entrar se abre la primera vista operativa; el Dashboard gerencial solo si no hay otra
+export const primeraRuta = u => [...MODULOS.slice(1), MODULOS[0]].flatMap(m => m[2]).find(v => puede(u, v[2]))?.[0] || null;

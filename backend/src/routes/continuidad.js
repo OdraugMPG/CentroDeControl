@@ -11,6 +11,7 @@ import { simularDia } from '../services/inventarioTurnos.js';
 import { dashboardInventario } from '../services/inventarioDashboard.js';
 import { validacionToma } from '../services/inventarioValidacion.js';
 import { comparacionCe, precisionProgramacion } from '../services/inventarioComparacion.js';
+import { movimientosSku, historiaSku } from '../services/movimientosSku.js';
 import { calendario, ubicacionesGrupo, reprogramar, quitar, restaurar } from '../services/inventarioCalendario.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
 
@@ -242,6 +243,9 @@ r.get('/inventario/validacion', ah(async (req, res) => { res.json(await validaci
 // toma oficial de CE contra la toma de la operación (días antes) por ubicación y SKU
 r.get('/inventario/comparacion', ah(async (req, res) => { res.json(await comparacionCe(req.query)); }));
 // precisión de la programación de CE (original y re-programada) contra la toma real de CE
+// movimientos de SKU: cambios de ubicación entre fotos diarias de la Base de stock
+r.get('/inventario/movimientos', ah(async (req, res) => { res.json(await movimientosSku(req.query)); }));
+r.get('/inventario/movimientos/sku', ah(async (req, res) => { res.json(await historiaSku(req.query)); }));
 r.get('/inventario/dashboard/programacion', ah(async (req, res) => { res.json(await precisionProgramacion(req.query)); }));
 // simulación por turno de un día: lo que la asignación diaria publicará como inventario de CE
 r.get('/inventario/simulacion', ah(async (req, res) => { res.json(await simularDia(fecha(req.query.fecha, 'fecha'))); }));

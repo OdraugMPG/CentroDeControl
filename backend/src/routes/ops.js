@@ -15,6 +15,7 @@ import { importarOlas } from '../import/olas.js';
 import { importarAlmacenado } from '../import/almacenado.js';
 import { analisisAlmacenado } from '../services/almacenado.js';
 import { analisisPendiente } from '../services/pendiente.js';
+import { dashboardGerencial } from '../services/dashboardGerencial.js';
 import { plantilla } from '../import/plantillas.js';
 import { modelo } from '../import/modelos.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
@@ -65,6 +66,12 @@ r.get('/almacenamiento/pendiente', ah(async (req, res) => {
   let f = {};
   try { f = req.query.f ? JSON.parse(String(req.query.f)) : {}; } catch { throw bad('Filtros inválidos.'); }
   res.json(await analisisPendiente(f && typeof f === 'object' ? f : {}));
+}));
+
+// ---------- Dashboard gerencial ----------
+r.get('/gerencial', ah(async (req, res) => {
+  const f = k => req.query[k] ? fecha(req.query[k], k) : null;
+  res.json(await dashboardGerencial({ desde: f('desde'), hasta: f('hasta'), fresco: req.query.fresco === '1' }));
 }));
 
 // ---------- Cierre de turno ----------

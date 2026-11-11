@@ -24,7 +24,9 @@ import InventarioCalendario from './pages/continuidad/InventarioCalendario.jsx';
 import InventarioDashboard from './pages/continuidad/InventarioDashboard.jsx';
 import InventarioValidacion from './pages/continuidad/InventarioValidacion.jsx';
 import InventarioComparacion from './pages/continuidad/InventarioComparacion.jsx';
+import InventarioMovimientos from './pages/continuidad/InventarioMovimientos.jsx';
 import Indicadores from './pages/continuidad/Indicadores.jsx';
+import Gerencial from './pages/gerencial/Gerencial.jsx';
 import Cargas from './pages/config/Cargas.jsx';
 import Configuracion from './pages/config/Configuracion.jsx';
 import Gestion from './pages/gestion/Gestion.jsx';
@@ -58,9 +60,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="inventario/dashboard" element={<InventarioDashboard />} />
             <Route path="inventario/validacion" element={<InventarioValidacion />} />
             <Route path="inventario/comparacion" element={<InventarioComparacion />} />
+            <Route path="inventario/movimientos" element={<InventarioMovimientos />} />
             <Route path="continuidad/inventario" element={<Navigate to="/inventario" replace />} />
             <Route path="continuidad/indicadores" element={<Indicadores />} />
             <Route path="gestion/:vista?" element={<Gestion />} />
+            <Route path="gerencial" element={<Gerencial />} />
             <Route path="cargas" element={<Cargas />} />
             <Route path="configuracion" element={<Configuracion />} />
             <Route path="admin/usuarios" element={<Usuarios />} />

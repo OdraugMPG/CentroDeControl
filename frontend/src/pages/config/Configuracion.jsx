@@ -12,7 +12,9 @@ const PARAMS = {
   minUbicar: ['LPN sin ubicar', 'minutos'], minConfirmacion: ['Plazo para confirmar una entrega de turno', 'minutos'], minAntesCierre: ['Cierre anticipado del turno', 'minutos antes del término'],
   invDiasAntes: ['Inventario: anticipación de la operación', 'días hábiles (lun. a sáb.) antes de Control de Existencia'],
   eriSano: ['ERI sano (verde) desde', 'proporción, 0,98 = 98%'], eriCritico: ['ERI crítico (rojo) bajo', 'proporción, 0,95 = 95%'],
-  eruSano: ['ERU sano (verde) desde', 'proporción, 0,99 = 99%'], eruCritico: ['ERU crítico (rojo) bajo', 'proporción, 0,97 = 97%']
+  eruSano: ['ERU sano (verde) desde', 'proporción, 0,99 = 99%'], eruCritico: ['ERU crítico (rojo) bajo', 'proporción, 0,97 = 97%'],
+  metaCumplimiento: ['Dashboard gerencial: meta de cumplimiento productivo', 'proporción, 0,95 = 95%'],
+  metaProgramacionCe: ['Dashboard gerencial: meta de accuracy de la programación de CE', 'proporción, 0,9 = 90%']
 };
 
 export default function Configuracion() {

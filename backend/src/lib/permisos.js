@@ -2,6 +2,7 @@
 // El frontend usa las mismas claves para mostrar u ocultar vistas; aquí se aplican en el servidor.
 
 export const PERMISOS = [
+  ['Dashboard gerencial', [['ge.dashboard', 'Dashboard gerencial: indicadores de producción, almacenamiento, inventario y stock']]],
   ['Operación', [
     ['op.resumen', 'Resumen'], ['op.almacenamiento', 'Por almacenar'], ['op.recepcion', 'Almacenado'],
     ['op.pedidos', 'Flujo de pedidos'], ['op.control', 'Control por hora'], ['op.cierre', 'Cierre de turno (ver)'],
@@ -21,7 +22,8 @@ export const PERMISOS = [
     ['co.inventario.planificar', 'Calendario de planificación: reprogramar y quitar ubicaciones'],
     ['co.inventario.dashboard', 'Dashboard de inventario: ERI / ERU, resultado neto y absoluto, top de SKU y ABC / XYZ'],
     ['co.inventario.validacion', 'Validación de la toma: primera, segunda y tercera pasada'],
-    ['co.inventario.comparacion', 'Toma CE vs operación: comparar la toma oficial de Control de Existencia con la de la operación']]],
+    ['co.inventario.comparacion', 'Toma CE vs operación: comparar la toma oficial de Control de Existencia con la de la operación'],
+    ['co.inventario.movimientos', 'Movimientos de SKU: cambios de ubicación entre las fotos diarias de stock']]],
   ['Datos', [['da.cargas', 'Cargas de extracciones'], ['da.configuracion', 'Metas, calendario y causas']]],
   ['Administración', [['ad.usuarios', 'Usuarios y roles'], ['gd.config', 'Configuración (CD, operarios, ubicaciones reservadas y parámetros de Gestión diaria)']]]
 ].map(([grupo, items]) => ({ grupo, items: items.map(([clave, nombre]) => ({ clave, nombre })) }));
@@ -36,7 +38,7 @@ export const ROLES_BASE = [
   ['Supervisor', 'Opera su turno: control, cierre, mi turno, inventario y cargas de extracciones.',
     [...de('op.'), 'gd.turno', 'gd.cierre', 'co.panel', 'co.turno', 'co.calendario', ...de('co.inventario'), 'da.cargas'].filter(c => c !== 'op.cierre.reabrir'), false],
   ['Gerente', 'Consulta resultados e indicadores, sin cargar ni modificar la operación.',
-    [...de('op.'), 'gd.cierre', 'gd.slow', 'gd.abc', 'gd.optimizacion', 'gd.osr', 'gd.participacion', 'co.panel', 'co.calendario', 'co.indicadores'].filter(c => !['op.cierre.registrar', 'op.cierre.reabrir'].includes(c)), false]
+    ['ge.dashboard', ...de('op.'), 'gd.cierre', 'gd.slow', 'gd.abc', 'gd.optimizacion', 'gd.osr', 'gd.participacion', 'co.panel', 'co.calendario', 'co.indicadores'].filter(c => !['op.cierre.registrar', 'op.cierre.reabrir'].includes(c)), false]
 ];
 
 // Reglas para las operaciones que modifican datos: [método, ruta, permisos (basta uno)].
