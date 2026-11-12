@@ -23,7 +23,7 @@ export const PERMISOS = [
     ['co.inventario.dashboard', 'Dashboard de inventario: ERI / ERU, resultado neto y absoluto, top de SKU y ABC / XYZ'],
     ['co.inventario.validacion', 'Validación de la toma: primera, segunda y tercera pasada'],
     ['co.inventario.comparacion', 'Toma CE vs operación: comparar la toma oficial de Control de Existencia con la de la operación'],
-    ['co.inventario.movimientos', 'Movimientos de SKU: cambios de ubicación entre las fotos diarias de stock']]],
+    ['co.inventario.movimientos', 'Movimientos de SKU (menú Sloting): cambios de ubicación entre las fotos diarias de stock']]],
   ['Datos', [['da.cargas', 'Cargas de extracciones'], ['da.configuracion', 'Metas, calendario y causas']]],
   ['Administración', [['ad.usuarios', 'Usuarios y roles'], ['gd.config', 'Configuración (CD, operarios, ubicaciones reservadas y parámetros de Gestión diaria)']]]
 ].map(([grupo, items]) => ({ grupo, items: items.map(([clave, nombre]) => ({ clave, nombre })) }));

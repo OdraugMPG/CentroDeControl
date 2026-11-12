@@ -25,6 +25,16 @@ const AL = {
   fecha: 'FECHA_SALIDA|FECHA SALIDA|FECHA_PICKING|FECHA_VENTA',
 };
 export const TIPOS_PICKING = ['TAREA', 'ETIQUETA'];
+export const TEMPS = ['T', 'V', 'I', 'SIN'];
+export const NOM_TEMP = { T: 'Toda temporada', V: 'Verano', I: 'Invierno', SIN: 'Sin temporada' };
+// Logística OSR del SKU en la Base: Y = apto para OSR; NO = N, REVISION u otro valor; SIN = no está en la Base
+export const NOM_LOG = { Y: 'Logística OSR = Y', NO: 'Sin Y (N, REVISION…)', SIN: 'No está en la Base' };
+/** Temporada que corre en una fecha (AAAA-MM-DD) según los meses de verano del parámetro. */
+export function temporadaDe(fecha, mesesVerano) {
+  const mes = Number(String(fecha || hoyIso()).slice(5, 7));
+  const v = String(mesesVerano || '9,10,11,12,1,2').split(/[,;\s]+/).map(Number).filter((m) => m >= 1 && m <= 12);
+  return v.includes(mes) ? 'V' : 'I';
+}
 export const ESTADOS = { EN: 'YA EN OSR', CAND: 'APTO SIN OSR', NO: 'NO APTO OSR', SIN_STOCK: 'NO ESTÁ EN LA BASE', SIN_VAL: 'SIN VALIDAR (sin Base)' };
 const LIMITE = 500;
 
@@ -333,7 +343,14 @@ async function calcular(params = {}) {
   const tipo = TIPOS_PICKING.includes(up(params.tipo)) ? up(params.tipo) : up(params.tipo) === 'TODOS' ? 'TODOS' : 'TAREA';
   const modo = params.modo === 'depto' ? 'depto' : 'total';
   const excluir = (Array.isArray(params.excluir) ? params.excluir : txt(params.excluir).split(',')).map(up).filter(Boolean);
-  const base0 = { info, target, tipo, modo, tipos: info.tipos, excluir };
+  // temporada: 'AUTO' = T + la temporada que corre al final del período (+ los SKU sin temporada, que no están en la Base y
+  // no se pueden clasificar: así el total no pierde esa venta); o una lista (T, V, I, SIN); vacío = todas
+  const tempActual = temporadaDe(params.hasta || info.hasta, p.mesesVerano);
+  const tAuto = up(params.temporada) === 'AUTO';
+  const temporadas = tAuto ? ['T', tempActual, 'SIN'] : (Array.isArray(params.temporada) ? params.temporada : txt(params.temporada).split(',')).map(up).filter((t) => TEMPS.includes(t));
+  // filtro de Logística OSR: 'Y' solo aptos, 'NOY' los que no son Y (incluye los que no están en la Base), vacío = todos
+  const logOsr = ['Y', 'NOY'].includes(up(params.logOsr)) ? up(params.logOsr) : '';
+  const base0 = { info, target, tipo, modo, tipos: info.tipos, excluir, logOsr, temporada: { sel: temporadas, auto: tAuto, actual: tempActual, mesesVerano: p.mesesVerano } };
   if (!info.registros) return { ...base0, sinDatos: true };
 
   const cond = [], val = [];
@@ -381,9 +398,31 @@ async function calcular(params = {}) {
     let cdP = '', uP = 0;
     for (const [cd, v] of Object.entries(x.porCd)) if (cd !== cdObj && v > uP) { cdP = cd; uP = v; }
     x.cdPrincipal = cdP;
+    x.temp = b?.temp && TEMPS.includes(b.temp) ? b.temp : 'SIN';
+    x.logC = !b ? 'SIN' : b.log === 'Y' ? 'Y' : 'NO';
   }
   const nomDe = (k, x) => nomDep.get(k) || x?.dptoArch || k;
   if (params.soloOsr) skus = skus.filter((x) => x.enLista);
+  // participación por Logística OSR (antes de filtrarla, para ver todas) y filtro
+  const lM = new Map();
+  for (const x of skus) {
+    const t = lM.get(x.logC) || { log: x.logC, nom: NOM_LOG[x.logC], skus: 0, u: 0, uObj: 0, otros: 0 };
+    t.skus++; t.u += x.u; t.uObj += x.uObj; t.otros += x.otros;
+    lM.set(x.logC, t);
+  }
+  const filtraLog = !!logOsr && !!base;
+  const pasaLog = (c) => !filtraLog || (logOsr === 'Y' ? c === 'Y' : c !== 'Y');
+  const porLog = ['Y', 'NO', 'SIN'].filter((t) => lM.has(t)).map((t) => ({ ...lM.get(t), pct: lM.get(t).u ? lM.get(t).uObj / lM.get(t).u : 0, incluida: pasaLog(t) }));
+  if (filtraLog) skus = skus.filter((x) => pasaLog(x.logC));
+  // participación por temporada (antes de filtrarla, para ver todas)
+  const tM = new Map();
+  for (const x of skus) {
+    const t = tM.get(x.temp) || { temp: x.temp, nom: NOM_TEMP[x.temp], skus: 0, u: 0, uObj: 0, otros: 0, cand: 0 };
+    t.skus++; t.u += x.u; t.uObj += x.uObj; t.otros += x.otros; if (x.cand) t.cand += x.otros;
+    tM.set(x.temp, t);
+  }
+  const porTemporada = TEMPS.filter((t) => tM.has(t)).map((t) => ({ ...tM.get(t), pct: tM.get(t).u ? tM.get(t).uObj / tM.get(t).u : 0, incluida: !temporadas.length || temporadas.includes(t) }));
+  if (temporadas.length) skus = skus.filter((x) => temporadas.includes(x.temp));
   const deptosTodos = skus;
   if (params.depto) skus = skus.filter((x) => x.dkey === params.depto);
 
@@ -440,6 +479,7 @@ async function calcular(params = {}) {
   const valD = [...val];
   let whereD = where;
   if (dptos) { valD.push(dptos); whereD += (whereD ? ' AND ' : 'WHERE ') + `dpto = ANY($${valD.length}::text[])`; }
+  if (temporadas.length || filtraLog) { valD.push(skus.map((x) => x.sku)); whereD += (whereD ? ' AND ' : 'WHERE ') + `sku = ANY($${valD.length}::text[])`; }
   const { rows: dia } = await q(`SELECT fecha::text AS fecha, cd, sum(unidades)::float8 AS u FROM venta_cd ${whereD} GROUP BY fecha, cd ORDER BY fecha`, valD);
   const diaM = new Map();
   for (const r of dia) {
@@ -451,11 +491,11 @@ async function calcular(params = {}) {
   const porDia = [...diaM.values()].map((d) => ({ ...d, pct: d.u ? (d.porCd[cdObj] || 0) / d.u : 0 }));
 
   return { ...base0, cds, cdObj, cdsCol, hayBase: !!base, baseCarga: base?.carga ? { fecha: base.carga.fecha, archivo: base.carga.archivo } : null,
-    hayColOsr: base ? base.hayCol : null, listaOSR: p.deptosOsr, total, porCd, deptos, sim, estados, porDia, skus, selSet };
+    hayColOsr: base ? base.hayCol : null, listaOSR: p.deptosOsr, total, porCd, deptos, sim, estados, porDia, porTemporada, porLog, skus, selSet };
 }
 
 const filaSku = (x) => ({ sku: x.sku, desc: x.desc, depto: x.dkey, cod: x.cod, matriz: x.b?.matriz || '', u: x.u, otros: x.otros, uObj: x.uObj, cdPrincipal: x.cdPrincipal,
-  estado: x.estado, log: x.b?.log || '', stockFuera: x.b ? x.b.fuera : null, stockOsr: x.b ? x.b.osr : null, acum: x.acum, pctAcum: x.pctAcum });
+  estado: x.estado, temp: x.temp, log: x.b?.log || '', stockFuera: x.b ? x.b.fuera : null, stockOsr: x.b ? x.b.osr : null, acum: x.acum, pctAcum: x.pctAcum });
 
 export async function participacion(params = {}) {
   const d = await calcular(params);
@@ -487,6 +527,7 @@ export async function archivoParticipacion(params = {}) {
   const resumen = [
     [`PARTICIPACIÓN DE LA VENTA POR CD · picking ${d.tipo === 'TODOS' ? 'TAREA + ETIQUETA' : d.tipo} · ${periodo}`],
     [`CDs considerados: ${d.cds.join(', ')}`],
+    [`Logística OSR: ${d.logOsr === 'Y' ? 'solo SKU con Y' : d.logOsr === 'NOY' ? 'solo SKU sin Y' : 'todos'}   ·   Temporadas: ${d.temporada.sel.length ? d.temporada.sel.map((t) => NOM_TEMP[t]).join(' + ') : 'todas'}${d.temporada.auto ? ' (según la fecha)' : ''}`],
     [`CD objetivo: ${cdObj}   ·   Target: ${r1(target * 100)}%   ·   Cómo se cumple: ${d.modo === 'depto' ? 'en cada depto' : 'en el total'}${params.depto ? `   ·   Depto: ${nomDep.get(params.depto) || params.depto}` : ''}${params.soloOsr ? '   ·   Solo deptos OSR' : ''}`],
     [],
     ['Unidades', total.u], [`Unidades ${cdObj}`, sim.obj], [`% ${cdObj} hoy`, r1(sim.pct)], ['Unidades que faltan para el target', Math.round(sim.brecha)],
@@ -503,8 +544,8 @@ export async function archivoParticipacion(params = {}) {
     ...deptos.map((x) => [x.cod, x.nom, x.enLista ? 'SI' : 'NO', x.u, ...cdsCol.map((c) => x.porCd[c] || 0), ...cdsCol.map((c) => r1(x.u ? (x.porCd[c] || 0) / x.u : 0)),
       x.nSkus, Math.round(x.brecha), x.nCand, x.nSel, x.cub, r1(x.pctRes), r1(x.pctMax), r1(x.pctMaxNo)]),
   ];
-  const encSku = ['SKU', 'Descripción', 'Cod. depto', 'Depto', 'Clase', 'Unid. vendidas', `Unid. ${cdObj}`, 'Unid. otros CD', 'CD principal', 'Estado', 'Logística OSR', `Stock ${cdObj}`, `Stock fuera ${cdObj}`];
-  const fila = (x) => [x.sku, x.desc, x.cod, nomDep.get(x.dkey) || x.dkey, x.b?.matriz || '', x.u, x.uObj, x.otros, x.cdPrincipal, x.estado, x.b?.log || '', x.b ? x.b.osr : '', x.b ? x.b.fuera : ''];
+  const encSku = ['SKU', 'Descripción', 'Cod. depto', 'Depto', 'Temporada', 'Clase', 'Unid. vendidas', `Unid. ${cdObj}`, 'Unid. otros CD', 'CD principal', 'Estado', 'Logística OSR', `Stock ${cdObj}`, `Stock fuera ${cdObj}`];
+  const fila = (x) => [x.sku, x.desc, x.cod, nomDep.get(x.dkey) || x.dkey, NOM_TEMP[x.temp], x.b?.matriz || '', x.u, x.uObj, x.otros, x.cdPrincipal, x.estado, x.b?.log || '', x.b ? x.b.osr : '', x.b ? x.b.fuera : ''];
   const sel = [[...encSku, 'Acumulado', `% ${cdObj} acumulado`], ...sim.sel.map((x) => [...fila(x), x.acum, r1(x.pctAcum)])];
   const otros = [[...encSku, 'Seleccionado'], ...d.skus.filter((x) => x.otros > 0).sort((a, b) => b.otros - a.otros).map((x) => [...fila(x), d.selSet.has(x.sku) ? 'SI' : ''])];
   const dia = [['Fecha salida', 'Unidades', ...cdsCol.map((c) => `Unid. ${c}`), `% ${cdObj}`], ...d.porDia.map((x) => [x.fecha, x.u, ...cdsCol.map((c) => x.porCd[c] || 0), r1(x.pct)])];
@@ -514,3 +555,6 @@ export async function archivoParticipacion(params = {}) {
     nombre: `Participacion_CD_${d.tipo}_${hoyIso()}.xlsx`,
   };
 }
+
+// para la sugerencia de aumento de participación del OSR (sugerenciaOsr.js)
+export { calcular as calcularParticipacion };

@@ -3,9 +3,12 @@
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, pct, fFecha } from './api.js';
 import { IrACarga, toast } from './ui.jsx';
+import SugerenciaOsr from './SugerenciaOsr.jsx';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 const TIPOS = [['TAREA', 'Tarea'], ['ETIQUETA', 'Etiqueta'], ['TODOS', 'Ambos']];
+export const NOM_TEMP = { T: 'Toda temporada', V: 'Verano', I: 'Invierno', SIN: 'Sin temporada' };
+const TEMP_CORTO = { T: 'T', V: 'V', I: 'I', SIN: '—' };
 const LECTURA_ESTADO = {
   'APTO SIN OSR': 'Logística OSR = "Y", sin stock ni venta desde OSR: son los candidatos a ingresar.',
   'YA EN OSR': 'Ya están en OSR pero parte de su venta sale de otros CD: subir más stock al OSR también sube la participación.',
@@ -15,7 +18,7 @@ const LECTURA_ESTADO = {
 };
 
 export default function ParticipacionCd() {
-  const [f, setF] = useState({ tipo: 'TAREA', desde: '', hasta: '', cd: '', target: '', modo: 'total', excluir: [], soloOsr: false, depto: '', estado: '' });
+  const [f, setF] = useState({ tipo: 'TAREA', desde: '', hasta: '', cd: '', target: '', modo: 'total', excluir: [], soloOsr: false, depto: '', estado: '', temporada: 'AUTO', logOsr: 'Y' });
   const [lista, setLista] = useState('sel');
   const [rec, setRec] = useState(0);
   const [r, setR] = useState(null);
@@ -36,12 +39,19 @@ export default function ParticipacionCd() {
 
   const obj = r?.cdObj || 'OSR';
   const s = r?.sim;
-  const excel = urlApi('/api/participacion/excel' + qs({ ...cuerpo, excluir: f.excluir.join(','), soloOsr: f.soloOsr ? '1' : '', estado: '' }));
+  const excel = urlApi('/api/participacion/excel' + qs({ ...cuerpo, excluir: f.excluir.join(','), soloOsr: f.soloOsr ? '1' : '', estado: '', temporada: f.temporada }));
   const altCd = (c) => setF({ ...f, excluir: f.excluir.includes(c) ? f.excluir.filter((x) => x !== c) : [...f.excluir, c], cd: f.cd === c ? '' : f.cd });
   const tile = (k, v, cls = '', n = '') => <div className={'kpi ' + cls}><div className="k">{k}</div><div className="v">{v}</div>{n && <div className="n">{n}</div>}</div>;
   const colorPct = (x) => (x >= r.target - 1e-9 ? 'var(--good)' : x >= r.target * 0.85 ? 'var(--warn)' : 'var(--bad)');
   const nomDep = r?.deptos?.find((d) => d.key === f.depto)?.nom || f.depto;
   const filasLista = lista === 'sel' ? r?.seleccion : r?.lista;
+  // temporada: AUTO (según la fecha), '' (todas) o lista separada por coma
+  const tSel = f.temporada === 'AUTO' ? (r?.temporada?.sel || []) : f.temporada.split(',').filter(Boolean);
+  const altTemp = (t) => {
+    const base = f.temporada === 'AUTO' ? (r?.temporada?.sel || []) : tSel.length ? tSel : ['T', 'V', 'I', 'SIN'];
+    const n = base.includes(t) ? base.filter((x) => x !== t) : [...base, t];
+    set('temporada')(n.length === 4 || !n.length ? '' : n.join(','));
+  };
 
   return (
     <>
@@ -72,6 +82,22 @@ export default function ParticipacionCd() {
               <div>
                 <div className="lbl">Cumplir el target</div>
                 <div className="chips">{[['total', 'En el total'], ['depto', 'En cada depto']].map(([k, t]) => <button key={k} className="chip" aria-pressed={f.modo === k} onClick={() => set('modo')(k)}>{t}</button>)}</div>
+              </div>
+              <div>
+                <div className="lbl">Logística OSR</div>
+                <div className="chips">{[['Y', 'Solo "Y"'], ['', 'Todos'], ['NOY', 'Sin "Y"']].map(([k, t]) => (
+                  <button key={k} className="chip" aria-pressed={f.logOsr === k} onClick={() => set('logOsr')(k)}
+                    title={k === 'Y' ? 'Solo SKU con Logística OSR = Y en la Base: los que pueden ir al OSR' : k === 'NOY' ? 'SKU con N, REVISION u otro valor, y los que no están en la Base' : 'Sin filtro de Logística OSR'}>{t}</button>))}</div>
+              </div>
+              <div>
+                <div className="lbl">Temporada</div>
+                <div className="chips">
+                  <button className="chip" aria-pressed={f.temporada === 'AUTO'} onClick={() => set('temporada')('AUTO')}
+                    title={`Toda temporada + la temporada que corre al ${fFecha(f.hasta || r.info.hasta)} (meses de verano: ${r.temporada?.mesesVerano}; se cambian en Configuración). Incluye los SKU sin temporada (no están en la Base).`}>
+                    Según la fecha{r.temporada ? ` (T + ${NOM_TEMP[r.temporada.actual]})` : ''}</button>
+                  <button className="chip" aria-pressed={f.temporada === ''} onClick={() => set('temporada')('')}>Todas</button>
+                  {['T', 'V', 'I', 'SIN'].map((t) => <button key={t} className="chip" aria-pressed={f.temporada !== 'AUTO' && f.temporada !== '' && tSel.includes(t)} onClick={() => altTemp(t)}>{NOM_TEMP[t]}</button>)}
+                </div>
               </div>
               <label className="inline" style={{ fontSize: 13 }}><input type="checkbox" checked={f.soloOsr} onChange={(e) => setF({ ...f, soloOsr: e.target.checked, depto: '' })} /> Solo deptos OSR</label>
             </>
@@ -118,6 +144,34 @@ export default function ParticipacionCd() {
                   </tbody>
                 </table>
                 <p className="note">La línea negra en la barra de {obj} marca el target.</p>
+                {r.porLog?.length > 0 && (
+                  <>
+                    <h4 style={{ margin: '14px 0 6px' }}>Participación {obj} por Logística OSR</h4>
+                    <table>
+                      <thead><tr><th>Logística OSR</th><th className="num">SKU</th><th className="num">Unidades</th><th className="num">% {obj}</th><th className="num">Otros CD</th><th /></tr></thead>
+                      <tbody>{r.porLog.map((t) => (
+                        <tr key={t.log} style={{ opacity: t.incluida ? 1 : 0.5 }} title={t.incluida ? '' : 'Fuera del análisis por el filtro de Logística OSR'}>
+                          <td>{t.nom}</td><td className="num">{fmt(t.skus)}</td><td className="num">{fmt(t.u)}</td><td className="num"><b style={{ color: colorPct(t.pct) }}>{pct(t.pct)}</b></td>
+                          <td className="num">{fmt(t.otros)}</td><td className="note">{t.incluida ? '' : 'excluida'}</td>
+                        </tr>))}</tbody>
+                    </table>
+                    <p className="note">Con "Solo Y" el total, la participación y la sugerencia consideran solo los SKU que pueden ir al OSR, así el target se mide sobre lo que realmente se puede llevar.</p>
+                  </>
+                )}
+                {r.porTemporada?.length > 0 && (
+                  <>
+                    <h4 style={{ margin: '14px 0 6px' }}>Participación {obj} por temporada</h4>
+                    <table>
+                      <thead><tr><th>Temporada</th><th className="num">Unidades</th><th className="num">% {obj}</th><th className="num">Otros CD</th><th className="num">Aptos sin {obj}</th><th /></tr></thead>
+                      <tbody>{r.porTemporada.map((t) => (
+                        <tr key={t.temp} style={{ opacity: t.incluida ? 1 : 0.5 }} title={t.incluida ? '' : 'Fuera del análisis por el filtro de temporada'}>
+                          <td>{t.nom}</td><td className="num">{fmt(t.u)}</td><td className="num"><b style={{ color: colorPct(t.pct) }}>{pct(t.pct)}</b></td>
+                          <td className="num">{fmt(t.otros)}</td><td className="num">{fmt(t.cand)}</td><td className="note">{t.incluida ? '' : 'excluida'}</td>
+                        </tr>))}</tbody>
+                    </table>
+                    <p className="note">Con "Según la fecha" el análisis toma los SKU de toda temporada y de la temporada que corre ({NOM_TEMP[r.temporada.actual]}), además de los sin temporada. Los de la otra temporada no se sugieren para OSR.</p>
+                  </>
+                )}
               </div>
               <div>
                 <h3 style={{ margin: '0 0 8px' }}>Participación {obj} por día de salida</h3>
@@ -132,6 +186,8 @@ export default function ParticipacionCd() {
                 </div>
               </div>
             </div>
+
+            <SugerenciaOsr cuerpo={{ ...cuerpo, excluir: f.excluir, estado: '' }} />
 
             <div className="row spread" style={{ margin: '18px 0 8px' }}>
               <h3 style={{ margin: 0 }}>Apertura por departamento</h3>
@@ -169,10 +225,10 @@ export default function ParticipacionCd() {
               : LECTURA_ESTADO[r.estado]}</p>
             <div className="tbl" style={{ maxHeight: 440 }}>
               <table>
-                <thead><tr><th>Clase</th><th>SKU</th><th>Descripción</th><th className="num">Vendidas</th><th className="num">En {obj}</th><th className="num">Otros CD</th><th>CD principal</th>
+                <thead><tr><th>Clase</th><th title="Temporada: T toda temporada, V verano, I invierno">Temp.</th><th>SKU</th><th>Descripción</th><th className="num">Vendidas</th><th className="num">En {obj}</th><th className="num">Otros CD</th><th>CD principal</th>
                   <th>Log. OSR</th><th className="num">Stock {obj}</th><th className="num">Stock fuera</th>{lista === 'sel' && <th className="num">% {obj} acum.</th>}</tr></thead>
                 <tbody>{(filasLista || []).map((x) => (
-                  <tr key={x.sku}><td>{x.matriz ? <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span> : '—'}</td><td className="mono">{x.sku}</td>
+                  <tr key={x.sku}><td>{x.matriz ? <span className={'pill ' + tono(x.matriz)}>{x.matriz}</span> : '—'}</td><td title={NOM_TEMP[x.temp]}>{TEMP_CORTO[x.temp] || '—'}</td><td className="mono">{x.sku}</td>
                     <td className="wrap">{x.desc}<div className="note" style={{ margin: 0 }}>{x.deptoNom}</div></td>
                     <td className="num">{fmt(x.u)}</td><td className="num">{x.uObj ? fmt(x.uObj) : '—'}</td><td className="num"><b>{fmt(x.otros)}</b></td><td>{x.cdPrincipal}</td>
                     <td>{x.log || '—'}</td><td className="num">{x.stockOsr === null ? '—' : fmt(x.stockOsr)}</td>

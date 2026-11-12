@@ -97,10 +97,11 @@ export async function baseSku() {
   for (const r of filas) {
     let x = sk.get(r.sku);
     if (!x) {
-      x = { sku: r.sku, desc: r.desc, depto: txt(r.depto) || '(SIN DEPTO)', qty: 0, vta: 0, osr: 0, apto: false, log: '', origen: [] };
+      x = { sku: r.sku, desc: r.desc, depto: txt(r.depto) || '(SIN DEPTO)', qty: 0, vta: 0, osr: 0, apto: false, log: '', origen: [], temp: '' };
       sk.set(r.sku, x);
     }
     const qty = num(r.qty);
+    if (!x.temp && txt(r.temp)) x.temp = up(r.temp); // temporada: T toda temporada, V verano, I invierno
     x.qty += qty;
     if (num(r.ventas) > x.vta) x.vta = num(r.ventas); // VENTAS es del SKU: se toma el mayor, no se suma
     if (esAptoOsr(r.logOsr)) x.apto = true; else if (!x.log && txt(r.logOsr)) x.log = up(r.logOsr);

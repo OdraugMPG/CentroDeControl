@@ -16,7 +16,9 @@ export const MODULOS = [
   // Sloting: las vistas siguen en /gestion y con sus permisos de Gestión diaria
   ['slot', 'Sloting', [
     ['/gestion/slow', 'Slow moving', 'gd.slow'], ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'],
-    ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion']]],
+    ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion'],
+    // Movimientos de SKU: su ruta sigue en /inventario y con su permiso de Gestión de inventario
+    ['/inventario/movimientos', 'Movimientos de SKU', 'co.inventario.movimientos']]],
   ['cont', 'Continuidad', [
     ['/continuidad', 'Panel', 'co.panel'], ['/continuidad/turno', 'Mi turno', 'co.turno'], ['/continuidad/calendario', 'Calendario', 'co.calendario'],
     ['/continuidad/asignar', 'Asignar', 'co.asignar'], ['/continuidad/equipo', 'Equipo', 'co.equipo'], ['/continuidad/dotacion', 'Dotación', 'co.dotacion'],
@@ -24,7 +26,6 @@ export const MODULOS = [
   ['inv', 'Gestión de inventario', [
     ['/inventario/dashboard', 'Dashboard', 'co.inventario.dashboard'], ['/inventario/validacion', 'Validación de la toma', 'co.inventario.validacion'],
     ['/inventario/comparacion', 'Toma CE vs operación', 'co.inventario.comparacion'],
-    ['/inventario/movimientos', 'Movimientos de SKU', 'co.inventario.movimientos'],
     ['/inventario', 'Inventario CD', 'co.inventario'], ['/inventario/calendario', 'Calendario de planificación', 'co.inventario.calendario']]],
   ['cfg', 'Datos', [['/cargas', 'Cargas de archivos', 'da.cargas', CARGAS], ['/configuracion', 'Metas y calendario', 'da.configuracion']]],
   ['adm', 'Administración', [['/admin/usuarios', 'Usuarios', 'ad.usuarios'], ['/admin/roles', 'Roles y permisos', 'ad.usuarios'],

@@ -60,17 +60,46 @@ function Matriz({ titulo, c, b, fechas, cds, med }) {
   );
 }
 
+// Movimientos para corregir el match: la mercadería está físicamente en la ubicación con sobrante (origen) y el sistema la
+// espera en la que tiene faltante (destino). Por SKU se emparejan de mayor a mayor y se mueve el menor de los dos.
+function movimientosMatch(lista) {
+  const out = [];
+  for (const g of lista) {
+    const orig = g.ubic.filter((u) => u.sobr > 0).map((u) => ({ ...u, q: u.sobr })).sort((a, b) => b.q - a.q);
+    const dest = g.ubic.filter((u) => u.falt > 0).map((u) => ({ ...u, q: u.falt })).sort((a, b) => b.q - a.q);
+    let i = 0, j = 0;
+    while (i < orig.length && j < dest.length) {
+      const c = Math.min(orig[i].q, dest[j].q);
+      out.push({ cd: g.cd, sku: g.sku, origen: orig[i].ubicacion, fOrigen: orig[i].fecha, destino: dest[j].ubicacion, fDestino: dest[j].fecha, cant: c });
+      orig[i].q -= c; dest[j].q -= c;
+      if (!orig[i].q) i++;
+      if (!dest[j].q) j++;
+    }
+  }
+  return out;
+}
+
 // Match: el mismo SKU falta en una ubicación y sobra en otra del mismo CD. Al netearlos baja la diferencia de inventario
 // (es mercadería mal ubicada, no una pérdida). Como la tabla dinámica: CD, SKU y ubicación con faltante y sobrante.
 function Match({ m, desde, hasta }) {
   const porCd = [...new Set(m.lista.map((g) => g.cd))].map((cd) => ({ cd, gs: m.lista.filter((g) => g.cd === cd) }));
   const suma = (gs, k) => gs.reduce((a, g) => a + g[k], 0);
   const n0 = (v) => (v ? N(v) : '');
+  const movs = movimientosMatch(m.lista);
+  // por ubicación: a dónde llevar (origen) o de dónde traer (destino)
+  const rol = new Map();
+  for (const x of movs) {
+    const o = `${x.cd}|${x.sku}|${x.origen}`, d = `${x.cd}|${x.sku}|${x.destino}`;
+    rol.set(o, [...(rol.get(o) || []), `→ ${x.destino} (${N(x.cant)})`]);
+    rol.set(d, [...(rol.get(d) || []), `← ${x.origen} (${N(x.cant)})`]);
+  }
+  const csvMov = () => descargar([['CD', 'SKU', 'Ubi. origen (sobrante)', 'Fecha toma origen', 'Ubi. destino (faltante)', 'Fecha toma destino', 'Cantidad a mover'],
+    ...movs.map((x) => [x.cd, x.sku, x.origen, x.fOrigen, x.destino, x.fDestino, x.cant])], `movimientos_match_${desde}_${hasta}.csv`);
   const csv = () => descargar([['CD', 'SKU', 'Ubicación', 'Fecha de toma', 'Faltante', 'Sobrante', 'Total general'],
     ...m.lista.flatMap((g) => g.ubic.map((u) => [g.cd, g.sku, u.ubicacion, u.fecha, u.falt, u.sobr, u.falt + u.sobr]))], `match_sku_${desde}_${hasta}.csv`);
   return (
     <Card title="Match de faltantes y sobrantes (mismo SKU)" hint="El mismo SKU que falta en una ubicación y sobra en otra del mismo CD: al netearlos baja la diferencia de inventario. Con la diferencia final de cada ubicación (la última toma del rango)."
-      actions={m.skus > 0 && <button type="button" className="ghost" onClick={csv}>Descargar CSV</button>}>
+      actions={m.skus > 0 && <div className="row" style={{ gap: 6 }}><button type="button" className="ghost" onClick={csvMov}>Descargar movimientos</button><button type="button" className="ghost" onClick={csv}>Descargar CSV</button></div>}>
       {!m.skus ? <p className="empty">No hay SKU que falten en una ubicación y sobren en otra del mismo CD con estos filtros.</p> : <>
         <div className="dash-match-k">
           <div><b>{N(m.skus)}</b><span>SKU con match</span><small>{N(m.totales)} netean toda su diferencia</small></div>
@@ -78,18 +107,27 @@ function Match({ m, desde, hasta }) {
           <div><b>{pctf(div(m.absMatch, m.absTotal))}</b><span>Baja la diferencia absoluta</span><small>de {N(m.absTotal)} a {N(m.absTotal - m.absMatch)} unidades</small></div>
         </div>
         <div className="tscroll val-det" style={{ maxHeight: 460, overflow: 'auto', marginTop: 12 }}><table className="val-match">
-          <thead><tr><th>CD</th><th>SKU</th><th>Ubicación</th><th className="num">Faltante</th><th className="num">Sobrante</th><th className="num">Total general</th><th className="num">Netea</th><th className="num">Queda</th></tr></thead>
+          <thead><tr><th>CD</th><th>SKU</th><th>Ubicación</th><th className="num">Faltante</th><th className="num">Sobrante</th><th className="num">Total general</th><th>Mover</th><th className="num">Netea</th><th className="num">Queda</th></tr></thead>
           <tbody>{porCd.map(({ cd, gs }) => [
             ...gs.flatMap((g) => [
               ...g.ubic.map((u, i) => (
                 <tr key={`${cd}|${g.sku}|${u.ubicacion}`}><td>{i === 0 && g === gs[0] ? <b>{cd}</b> : ''}</td><td>{i === 0 ? <b>{g.sku}</b> : ''}</td>
-                  <td title={`Toma ${dmy(u.fecha)}`}>{u.ubicacion}</td><td className="num warn">{n0(u.falt)}</td><td className="num">{n0(u.sobr)}</td><td className="num">{N(u.falt + u.sobr)}</td><td /><td /></tr>)),
-              <tr key={`${cd}|${g.sku}|t`} className="val-m-sub"><td /><td colSpan={2}>Total {g.sku}</td><td className="num">{N(g.falt)}</td><td className="num">{N(g.sobr)}</td><td className="num">{N(g.falt + g.sobr)}</td>
+                  <td title={`Toma ${dmy(u.fecha)}`}>{u.ubicacion}</td><td className="num warn">{n0(u.falt)}</td><td className="num">{n0(u.sobr)}</td><td className="num">{N(u.falt + u.sobr)}</td>
+                  <td className="val-mover">{(rol.get(`${cd}|${g.sku}|${u.ubicacion}`) || []).map((t) => <div key={t} className={t[0] === '→' ? '' : 'muted'}>{t}</div>)}</td><td /><td /></tr>)),
+              <tr key={`${cd}|${g.sku}|t`} className="val-m-sub"><td /><td colSpan={2}>Total {g.sku}</td><td className="num">{N(g.falt)}</td><td className="num">{N(g.sobr)}</td><td className="num">{N(g.falt + g.sobr)}</td><td />
                 <td className="num"><b>{N(g.neteo)}</b></td><td className="num"><b className={g.queda ? 'warn' : 'ok'}>{signo(g.queda)}</b></td></tr>]),
             <tr key={`${cd}|t`} className="val-m-cd"><td colSpan={3}>Total {cd}</td><td className="num">{N(suma(gs, 'falt'))}</td><td className="num">{N(suma(gs, 'sobr'))}</td>
-              <td className="num">{N(suma(gs, 'falt') + suma(gs, 'sobr'))}</td><td className="num">{N(suma(gs, 'neteo'))}</td><td className="num">{signo(suma(gs, 'queda'))}</td></tr>])}</tbody>
+              <td className="num">{N(suma(gs, 'falt') + suma(gs, 'sobr'))}</td><td /><td className="num">{N(suma(gs, 'neteo'))}</td><td className="num">{signo(suma(gs, 'queda'))}</td></tr>])}</tbody>
         </table></div>
-        <p className="hint">Netea: las unidades que se compensan (el menor entre faltante y sobrante). Queda: la diferencia del SKU después de netear (negativo = sigue faltando).</p>
+        <h4 className="dash-sub" style={{ marginTop: 14 }}>Movimientos a realizar <small>sacar de la ubicación con sobrante y llevar a la que tiene faltante</small></h4>
+        <div className="tscroll" style={{ maxHeight: 360, overflow: 'auto' }}><table className="val-match">
+          <thead><tr><th>CD</th><th>SKU</th><th>Ubi. origen <small className="muted">(sobrante)</small></th><th /><th>Ubi. destino <small className="muted">(faltante)</small></th><th className="num">Cantidad a mover</th></tr></thead>
+          <tbody>{movs.map((x, i) => (
+            <tr key={i}><td>{x.cd}</td><td><b>{x.sku}</b></td><td title={`Toma ${dmy(x.fOrigen)}`}>{x.origen}</td><td className="muted" aria-hidden="true">→</td>
+              <td title={`Toma ${dmy(x.fDestino)}`}>{x.destino}</td><td className="num"><b>{N(x.cant)}</b></td></tr>))}</tbody>
+          <tfoot><tr><th colSpan={5}>{N(movs.length)} {movs.length === 1 ? 'movimiento' : 'movimientos'}</th><th className="num">{N(movs.reduce((a, x) => a + x.cant, 0))}</th></tr></tfoot>
+        </table></div>
+        <p className="hint">Mover: en la ubicación con sobrante, a dónde llevar (→) y cuánto; en la que tiene faltante, de dónde viene (←). Con varias ubicaciones del mismo SKU se emparejan de mayor a mayor. Verificar físicamente antes de mover y registrar el movimiento en el WMS. Netea: las unidades que se compensan (el menor entre faltante y sobrante). Queda: la diferencia del SKU después de netear (negativo = sigue faltando).</p>
       </>}
     </Card>
   );

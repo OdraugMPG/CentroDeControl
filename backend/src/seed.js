@@ -50,7 +50,9 @@ export const PARAMETROS = {
   eriSano: 0.98, eriCritico: 0.95,   // semáforo ERI: verde desde sano, rojo bajo crítico, amarillo entre ambos
   eruSano: 0.99, eruCritico: 0.97,   // semáforo ERU
   metaCumplimiento: 0.95,    // dashboard gerencial: meta de cumplimiento productivo (unidades / meta por hora)
-  metaProgramacionCe: 0.9    // dashboard gerencial: meta de accuracy de la programación de CE
+  metaProgramacionCe: 0.9,   // dashboard gerencial: meta de accuracy de la programación de CE
+  movMinDentro: 0,           // movimientos de SKU: minutos por cambio de ubicación dentro del CD (0 = medido con ALM_USER)
+  movMinExtraEntreCd: 5      // movimientos de SKU: minutos que se suman a un cambio entre CD (traslado)
 };
 
 export async function seed() {

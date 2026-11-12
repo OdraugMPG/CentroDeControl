@@ -10,10 +10,11 @@ import { q, tx } from '../gestion/db.js';
 import { soloFecha, txt } from '../import/excel.js';
 import { addDias } from '../lib/turnos.js';
 import { clasificacionActual } from '../gestion/services/abcXyz.js';
+import { q as qp } from '../db.js';
+import { cat } from '../lib/catalogos.js';
 
 const LOTE = 5000;
 const TOP_SKU = 1000;
-const TOP_UBIC = 500;
 const up = (v) => (txt(v) || '').toUpperCase();
 const entre = (a, b) => Math.round((Date.parse(`${b}T12:00:00`) - Date.parse(`${a}T12:00:00`)) / 864e5);
 
@@ -21,10 +22,30 @@ const entre = (a, b) => Math.round((Date.parse(`${b}T12:00:00`) - Date.parse(`${
 async function clasesAbc() {
   try {
     const c = await clasificacionActual();
-    const m = new Map();
+    const m = new Map(), surtido = new Map();
     for (const [cd, filas] of c.grupos) for (const x of filas) m.set(`${cd}|${x.sku}`, x.matriz);
-    return { m, metodo: c.metodo };
+    for (const x of c.grupos.get('TODOS') || []) surtido.set(x.matriz, (surtido.get(x.matriz) || 0) + 1);
+    return { m, metodo: c.metodo, surtido };
   } catch { return null; }
+}
+
+// Tiempo de un cambio de ubicación. Base medida: mediana del tiempo entre almacenamientos consecutivos del mismo usuario
+// (ALM_USER, últimos 30 días, intervalos de 5 s a 30 min). Un cambio dentro del CD = sacar + almacenar = 2 ciclos;
+// entre CD se suma el traslado. Ambos se pueden fijar en Datos (movMinDentro > 0 reemplaza lo medido).
+let ciclo = null;
+async function tiempos() {
+  if (!ciclo || Date.now() - ciclo.t > 3600e3) {
+    const { rows: [r] } = await qp(`WITH t AS (SELECT f_mod - lag(f_mod) OVER (PARTITION BY usuario ORDER BY f_mod) AS d FROM recepcion_almacenado
+        WHERE usuario IS NOT NULL AND f_mod > (SELECT max(f_mod) FROM recepcion_almacenado) - interval '30 days')
+      SELECT count(*)::int AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM d) / 60)::float AS p50
+      FROM t WHERE d BETWEEN interval '5 seconds' AND interval '30 minutes'`).catch(() => ({ rows: [{}] }));
+    ciclo = { t: Date.now(), n: r.n || 0, p50: r.p50 || null };
+  }
+  const p = (await cat()).p || {};
+  const fijo = Number(p.movMinDentro) > 0 ? Number(p.movMinDentro) : null;
+  const dentro = fijo ?? (ciclo.p50 ? 2 * ciclo.p50 : 2);
+  const extra = Number.isFinite(Number(p.movMinExtraEntreCd)) ? Number(p.movMinExtraEntreCd) : 5;
+  return { ciclo: ciclo.p50, n: ciclo.n, medido: !fijo && !!ciclo.p50, dentro, extraEntreCd: extra, entreCd: dentro + extra };
 }
 
 /** Fotos de stock disponibles: la última carga de INICIO de cada día */
@@ -109,7 +130,7 @@ export async function prepararPares() {
 /** desde / hasta: días de la foto (por defecto, los últimos 30 días con fotos); cd, zona (3 primeras letras de la ubicación),
  *  depto y buscar (SKU o descripción) filtran los eventos. */
 export async function movimientosSku({ desde, hasta, cd, zona, depto, buscar } = {}) {
-  const [{ fotos: f, nuevos }, abc] = await Promise.all([prepararPares(), clasesAbc()]);
+  const [{ fotos: f, nuevos }, abc, T] = await Promise.all([prepararPares(), clasesAbc(), tiempos()]);
   const base = { fotos: f.length, primera: f[0]?.fecha || null, ultima: f[f.length - 1]?.fecha || null, calculados: nuevos };
   if (f.length < 2) return { ...base, tot: null };
   hasta = soloFecha(hasta) || base.ultima;
@@ -138,9 +159,9 @@ export async function movimientosSku({ desde, hasta, cd, zona, depto, buscar } =
       if (esCambio(x)) { g.traslado++; g.skus.add(x.sku); if (x.entre_cd) g.entreCd++; } else if (x.clase === 'almacenamiento') g.almacenamiento++; else if (x.clase === 'vaciada') g.vaciada++;
     }
     let s = porSku.get(x.sku);
-    if (!s) { s = { sku: x.sku, desc: x.descripcion, depto: x.depto, cambios: 0, entreCd: 0, almacenamiento: 0, vaciada: 0, dias: new Set(), ubic: new Set(), cds: new Set(), ultimo: null }; porSku.set(x.sku, s); }
+    if (!s) { s = { sku: x.sku, desc: x.descripcion, depto: x.depto, cambios: 0, entreCd: 0, almacenamiento: 0, vaciada: 0, dias: new Set(), ubic: new Set(), cds: new Set(), ultimo: null, unid: 0 }; porSku.set(x.sku, s); }
     s.ubic.add(x.ubicacion); if (x.cd) s.cds.add(x.cd);
-    if (esCambio(x)) { s.cambios++; s.dias.add(x.fecha); if (x.entre_cd) s.entreCd++; if (!s.ultimo || x.fecha > s.ultimo) s.ultimo = x.fecha; }
+    if (esCambio(x)) { s.cambios++; s.dias.add(x.fecha); if (x.tipo === 'E') s.unid += x.qty; if (x.entre_cd) s.entreCd++; if (!s.ultimo || x.fecha > s.ultimo) s.ultimo = x.fecha; }
     else if (x.clase === 'almacenamiento') s.almacenamiento++; else if (x.clase === 'vaciada') s.vaciada++;
     let u = porUbic.get(`${x.cd}|${x.ubicacion}`);
     if (!u) { u = { cd: x.cd, ubicacion: x.ubicacion, zona: x.ubicacion.slice(0, 3), entradas: 0, salidas: 0, traslados: 0, skus: new Set() }; porUbic.set(`${x.cd}|${x.ubicacion}`, u); }
@@ -150,12 +171,22 @@ export async function movimientosSku({ desde, hasta, cd, zona, depto, buscar } =
   const cerrar = (g) => ({ traslado: g.traslado, almacenamiento: g.almacenamiento, vaciada: g.vaciada, entreCd: g.entreCd, skus: g.skus.size });
   const skus = [...porSku.values()].filter((s) => s.cambios > 0)
     .map((s) => ({ sku: s.sku, desc: s.desc, depto: s.depto, abc: abc?.m.get(`TODOS|${s.sku}`) || null, cambios: s.cambios, dias: s.dias.size, entreCd: s.entreCd, almacenamiento: s.almacenamiento, vaciada: s.vaciada,
-      ubicaciones: s.ubic.size, cds: [...s.cds].sort().join(' · '), ultimo: s.ultimo }))
+      ubicaciones: s.ubic.size, cds: [...s.cds].sort().join(' · '), ultimo: s.ultimo, unidades: s.unid }))
     .sort((a, b) => b.cambios - a.cambios || b.dias - a.dias || b.ubicaciones - a.ubicaciones || a.sku.localeCompare(b.sku));
+  // movimientos por categoría ABC / XYZ (consolidada): cuántos SKU del surtido hay, cuántos se movieron, cambios y tiempo estimado
+  const SIN = '—';
+  const porClase = new Map();
+  const celda = (k) => porClase.get(k) || porClase.set(k, { matriz: k, skusStock: abc?.surtido.get(k) || 0, skus: 0, cambios: 0, entreCd: 0, unidades: 0, multi: 0 }).get(k);
+  if (abc) for (const k of abc.surtido.keys()) celda(k);
+  for (const s of skus) {
+    const c = celda(s.abc || SIN);
+    c.skus++; c.cambios += s.cambios; c.entreCd += s.entreCd; c.unidades += s.unidades; if (s.ubicaciones > 2) c.multi++;
+  }
+  const minutos = (c) => (c.cambios - c.entreCd) * T.dentro + c.entreCd * T.entreCd;
+  const matriz = { metodo: abc?.metodo || null, tiempos: T, celdas: [...porClase.values()].map((c) => ({ ...c, minutos: minutos(c) })) };
+
   // cuántos SKU cambiaron 1, 2, 3, 4 o 5+ veces
   const frec = [1, 2, 3, 4, 5].map((n) => ({ n, skus: skus.filter((s) => (n === 5 ? s.cambios >= 5 : s.cambios === n)).length }));
-  const ubic = [...porUbic.values()].map((u) => ({ ...u, skus: u.skus.size, mov: u.entradas + u.salidas }))
-    .sort((a, b) => b.skus - a.skus || b.mov - a.mov || a.ubicacion.localeCompare(b.ubicacion));
   // días sin foto entre dos fotos consecutivas (los cambios de esos días se ven juntos en la foto siguiente)
   const saltos = par.rows.filter((p) => entre(p.fecha_ant, p.fecha) > 1).map((p) => ({ desde: p.fecha_ant, hasta: p.fecha, dias: entre(p.fecha_ant, p.fecha) }));
 
@@ -164,7 +195,7 @@ export async function movimientosSku({ desde, hasta, cd, zona, depto, buscar } =
     tot: { ...cerrar(tot), skusCambio: skus.length, ubicaciones: porUbic.size },
     porDia: [...porDia].sort(([a], [b]) => a.localeCompare(b)).map(([fecha, g]) => ({ fecha, ...cerrar(g) })),
     porCd: [...porCd].map(([c, g]) => ({ cd: c || '(sin CD)', ...cerrar(g) })).sort((a, b) => b.traslado - a.traslado),
-    frec, totalSkus: skus.length, skus: skus.slice(0, TOP_SKU), totalUbic: ubic.length, ubic: ubic.slice(0, TOP_UBIC) };
+    frec, totalSkus: skus.length, skus: skus.slice(0, TOP_SKU), matriz };
 }
 
 /** Historia de un SKU: en qué ubicaciones estuvo cada día (cantidad) y sus cambios. */

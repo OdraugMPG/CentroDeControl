@@ -17,6 +17,7 @@ import { cargarProyeccion, borrarProyeccion, simularAbastecimiento, archivoAbast
 import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEventos, simularTodo, simularEvento, archivoEvento, archivoTodo } from '../gestion/services/eventosOsr.js';
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
+import { sugerenciaOsr } from '../gestion/services/sugerenciaOsr.js';
 import { sugeridoTotes } from '../gestion/services/reabastoTotes.js';
 import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr, cargarCapacidadOsr, borrarCapacidadOsr, capacidadOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
@@ -176,6 +177,7 @@ app.post('/participacion/venta', subir.single('archivo'), r(async (req) => {
 }));
 app.post('/participacion/venta/borrar', r(() => borrarVentaCd()));
 app.post('/participacion/simular', r((req) => participacion(req.body || {})));
+app.post('/participacion/sugerencia', r((req) => sugerenciaOsr(req.body || {})));
 app.get('/participacion/excel', r(async (req, res) => enviarXlsx(res, await archivoParticipacion({ ...req.query, soloOsr: req.query.soloOsr === '1' }))));
 app.get('/optimizacion/eventos/config', r(() => configEventos()));
 app.post('/optimizacion/eventos/config', r((req) => guardarConfigEventos(req.body || {})));

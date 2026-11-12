@@ -52,14 +52,16 @@ export const DEFAULTS = {
   evtTopN: { v: 300, n: 'Simulador de eventos (TOP_N): SKU elegibles a priorizar por evento' },
   evtUmbral: { v: 1.3, n: 'Simulador de eventos (UMBRAL_AJUSTADO): stock / demanda del periodo bajo este valor = AJUSTADO' },
   pickUnHH: { v: 60, n: 'Picking manual: unidades por hora-hombre (para estimar operarios que libera OSR)' },
+  osrUnHH: { v: 250, n: 'OSR: unidades por hora-hombre en las estaciones de picking (balance de headcount de la sugerencia de participación; 0 = no se suman operarios)' },
   invDiasA: { v: 30, n: 'Inventario cíclico: días entre conteos de una ubicación clase A' },
   invDiasB: { v: 90, n: 'Inventario cíclico: días entre conteos de una ubicación clase B' },
   invDiasC: { v: 180, n: 'Inventario cíclico: días entre conteos de una ubicación clase C' },
   horarioT1: { v: '07:00-15:00', n: 'Horario turno 1' },
   horarioT2: { v: '15:00-23:00', n: 'Horario turno 2' },
   horarioT3: { v: '23:00-07:00', n: 'Horario turno 3' },
+  mesesVerano: { v: '9,10,11,12,1,2', n: 'Temporada: meses de VERANO (V) separados con coma; los demás son INVIERNO (I). Los SKU T (toda temporada) van siempre' },
 };
-const TEXTO = new Set(['porPiso', 'tramos', 'cdsExcluir', 'smDestino', 'cdPrioritario', 'cdOsr', 'cdsConsPrimero', 'cdsBuffer', 'cdEtiqueta', 'deptosOsr', 'soloDeptosOsr', 'osrClasesAbc', 'osrClasesXyz', 'horarioT1', 'horarioT2', 'horarioT3']);
+const TEXTO = new Set(['porPiso', 'tramos', 'cdsExcluir', 'smDestino', 'cdPrioritario', 'cdOsr', 'cdsConsPrimero', 'cdsBuffer', 'cdEtiqueta', 'deptosOsr', 'soloDeptosOsr', 'osrClasesAbc', 'osrClasesXyz', 'horarioT1', 'horarioT2', 'horarioT3', 'mesesVerano']);
 
 export async function leerParametros() {
   const { rows } = await q('SELECT clave, valor FROM parametros');

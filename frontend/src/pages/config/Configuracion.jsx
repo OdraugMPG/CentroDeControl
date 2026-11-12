@@ -14,7 +14,9 @@ const PARAMS = {
   eriSano: ['ERI sano (verde) desde', 'proporción, 0,98 = 98%'], eriCritico: ['ERI crítico (rojo) bajo', 'proporción, 0,95 = 95%'],
   eruSano: ['ERU sano (verde) desde', 'proporción, 0,99 = 99%'], eruCritico: ['ERU crítico (rojo) bajo', 'proporción, 0,97 = 97%'],
   metaCumplimiento: ['Dashboard gerencial: meta de cumplimiento productivo', 'proporción, 0,95 = 95%'],
-  metaProgramacionCe: ['Dashboard gerencial: meta de accuracy de la programación de CE', 'proporción, 0,9 = 90%']
+  metaProgramacionCe: ['Dashboard gerencial: meta de accuracy de la programación de CE', 'proporción, 0,9 = 90%'],
+  movMinDentro: ['Movimientos de SKU: minutos por cambio de ubicación dentro del CD', '0 = medido con ALM_USER (2 × ciclo de almacenamiento)'],
+  movMinExtraEntreCd: ['Movimientos de SKU: minutos extra por cambio entre CD', 'traslado entre CD']
 };
 
 export default function Configuracion() {

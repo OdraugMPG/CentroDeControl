@@ -1,5 +1,6 @@
 // Movimientos de SKU (Gestión de inventario): cambios de ubicación detectados comparando la Base de stock de cada día con
-// la del día anterior. Resumen por día y CD, SKU con más cambios, ubicaciones con más rotación y la historia de un SKU
+// la del día anterior. Resumen por día y CD, movimientos por categoría ABC / XYZ (con tiempo estimado y sugerencias),
+// SKU con más cambios y la historia de un SKU
 // (en qué ubicaciones estuvo cada día).
 import { useState } from 'react';
 import { useCarga } from '../../lib/contexto.jsx';
@@ -25,6 +26,102 @@ function Abc({ m, metodo = 'rotacion' }) {
   const t = m[1] === '-' ? 'm-n' : 'ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]);
   return <span className="cmp-res" style={{ '--c': `var(${t === 'm-n' ? '--slate' : TONO_ABC[t]})`, fontWeight: 700 }}
     title={`${m[0]}: ${ABC_T[m[0]] || ''}${m[1] !== '-' ? ` · ${m[1]}: ${XYZ_T[metodo]?.[m[1]] || ''}` : ''}`}>{m[1] === '-' ? `${m[0]} —` : m}</span>;
+}
+
+// ---------- Movimientos por categoría ABC / XYZ ----------
+const hrs = (min) => (min === null || min === undefined ? '—' : min < 60 ? `${N(min)} min` : `${N(min / 60)} h`);
+const dec = (v, d = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toLocaleString('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d }));
+const pct1 = (v) => (v === null || v === undefined ? '—' : `${dec(v * 100)}%`);
+const MED_MAT = {
+  cambios: ['Cambios', (c) => c.cambios, (c) => N(c.cambios)],
+  horas: ['Horas estimadas', (c) => c.minutos, (c) => hrs(c.minutos)],
+  idx: ['Intensidad', (c) => c.idx, (c) => (c.idx === null ? '—' : `${dec(c.idx)}×`)],
+  porSku: ['Cambios por SKU', (c) => c.porSku, (c) => dec(c.porSku)]
+};
+// sugerencia según la categoría y lo que muestran sus datos
+function sugerencia(c, T) {
+  const a = c.matriz[0], x = c.matriz[1], out = [];
+  if (c.matriz === '—') out.push('SKU sin clasificación vigente (no están en la Base de ABC / XYZ): revisar y clasificarlos para asignarles una ubicación según su demanda.');
+  else if (a !== 'C' && x === 'X') out.push('Alta demanda y estable: ubicación fija de picking en la zona de mejor acceso, dimensionada para varios días de venta, con reposición mínimo / máximo desde reserva. No debería reubicarse.');
+  else if (a !== 'C' && x === 'Y') out.push('Demanda alta pero con rotación irregular: ubicación fija con capacidad para el pico y reposición programada. Muchos cambios suelen venir de ubicaciones chicas que se desbordan: revisar el tamaño de la ubicación (slotting por volumen).');
+  else if (a !== 'C' && x === 'Z') out.push('Demanda alta pero sin venta en el período: dejar en reserva cercana y mover solo con reposición planificada.');
+  else if (x === 'Z') out.push('Sin venta o sin stock: no debería moverse. Congelar las reubicaciones (solo para liberar espacio), consolidar en una ubicación de reserva o nivel alto y derivar a Slow moving para liquidar o devolver.');
+  else out.push('Baja demanda: ubicación fija en reserva o niveles altos; si hay que reubicar, agrupar los cambios en una ventana semanal en vez de hacerlos a diario.');
+  if (c.cambios && c.entreCd / c.cambios >= 0.15) out.push(`${pct1(c.entreCd / c.cambios)} de sus cambios son entre CD (${hrs(c.entreCd * T.entreCd)}): revisar la regla de CD de destino (Participación por CD, Optimización ABC) para que quede en su CD definitivo al primer almacenamiento.`);
+  if (c.skus && c.multi / c.skus >= 0.3) out.push(`${N(c.multi)} SKU (${pct1(c.multi / c.skus)}) pasaron por más de 2 ubicaciones: consolidar el stock repartido en una sola.`);
+  return out;
+}
+
+function MatrizMov({ M, metodo, clase, setClase }) {
+  const [med, setMed] = useState('horas');
+  const T = M.tiempos;
+  const tot = M.celdas.reduce((s, c) => ({ stock: s.stock + c.skusStock, cambios: s.cambios + c.cambios, min: s.min + c.minutos, skus: s.skus + c.skus }), { stock: 0, cambios: 0, min: 0, skus: 0 });
+  const celdas = M.celdas.map((c) => ({ ...c, pStock: div(c.skusStock, tot.stock), pMov: div(c.cambios, tot.cambios), pMin: div(c.minutos, tot.min),
+    idx: c.skusStock && tot.stock ? div(c.cambios, tot.cambios) / div(c.skusStock, tot.stock) : null, porSku: div(c.cambios, c.skus), horasDia: div(c.minutos / 60, M.dias || 1) }));
+  const de = (k) => celdas.find((c) => c.matriz === k);
+  const [, val, fmt] = MED_MAT[med];
+  const max = Math.max(1e-9, ...celdas.filter((c) => c.matriz !== '—').map((c) => val(c) || 0));
+  const xyz = metodo === 'historia' ? { X: 'estable', Y: 'variable', Z: 'muy variable' } : { X: 'alta rotación', Y: 'rotación baja', Z: 'sin venta / sin stock' };
+  // intensidad: rojo sobre 1 (se mueve más que su peso en el surtido); el resto, azul por magnitud
+  const fondo = (c) => {
+    const v = val(c);
+    if (!v) return 'var(--empty)';
+    if (med === 'idx') return v > 1 ? `color-mix(in srgb, var(--red) ${Math.round(15 + 70 * Math.min(1, (v - 1) / 2))}%, var(--panel))` : `color-mix(in srgb, var(--blue) ${Math.round(10 + 25 * v)}%, var(--panel))`;
+    return `color-mix(in srgb, var(--blue) ${Math.round(10 + 75 * (v / max))}%, var(--panel))`;
+  };
+  const claro = (c) => (med === 'idx' ? (val(c) || 0) > 2.2 : (val(c) || 0) / max > 0.6);
+  const orden = celdas.filter((c) => c.cambios).sort((a, b) => b.minutos - a.minutos);
+  const foco = [...new Set([...orden.slice(0, 3), ...orden.filter((c) => c.idx >= 1.5)])];
+  return (
+    <Card title="Movimientos por categoría ABC / XYZ" actions={
+      <div className="row" role="group" aria-label="Medida de la matriz" style={{ gap: 6 }}>
+        {Object.entries(MED_MAT).map(([k, [l]]) => <button key={k} type="button" className={med === k ? 'btn' : 'ghost'} aria-pressed={med === k} onClick={() => setMed(k)}>{l}</button>)}
+      </div>}
+      hint="Qué categoría genera más cambios de ubicación y cuánto tiempo consumen. Clasificación consolidada vigente (Sloting, ABC / XYZ). Intensidad = % de los cambios ÷ % de los SKU del surtido: sobre 1× la categoría se mueve más de lo que pesa. Clic en una celda para filtrar el ranking de SKU.">
+      <dl className="kpis" style={{ marginTop: 0 }}>
+        <div className="kpi"><dt>Tiempo estimado en cambios</dt><dd>{hrs(tot.min)}</dd><small className="muted" style={{ display: 'block', fontSize: 12 }}>{N(tot.cambios)} cambios en {N(M.dias)} {M.dias === 1 ? 'día' : 'días'}</small></div>
+        <div className="kpi"><dt>Por día</dt><dd>{hrs(div(tot.min, M.dias))}</dd><small className="muted" style={{ display: 'block', fontSize: 12 }}>≈ {dec(div(tot.min / 60, (M.dias || 1) * 8))} personas de jornada completa (8 h)</small></div>
+        <div className="kpi"><dt>Por cambio</dt><dd>{dec(T.dentro)} <small>min</small></dd><small className="muted" style={{ display: 'block', fontSize: 12 }}>dentro del CD · entre CD {dec(T.entreCd)} min</small></div>
+        {orden[0] && <div className="kpi"><dt>Categoría con más tiempo</dt><dd>{orden[0].matriz}</dd><small className="muted" style={{ display: 'block', fontSize: 12 }}>{pct1(orden[0].pMin)} del tiempo · {pct1(orden[0].pStock)} de los SKU</small></div>}
+      </dl>
+      <div className="grid" style={{ marginTop: 12 }}>
+        <div className="s5">
+          <table className="mm-tabla" aria-label={`Matriz ABC / XYZ: ${MED_MAT[med][0]}`}>
+            <thead><tr><th />{['X', 'Y', 'Z'].map((z) => <th key={z}>{z}<small>{xyz[z]}</small></th>)}</tr></thead>
+            <tbody>{['A', 'B', 'C'].map((a) => (
+              <tr key={a}><th>{a}<small>{ABC_T[a]}</small></th>
+                {['X', 'Y', 'Z'].map((z) => {
+                  const c = de(a + z);
+                  if (!c) return <td key={z} className="mm-vacia">—</td>;
+                  const sel = clase === c.matriz;
+                  return (
+                    <td key={z}>
+                      <button type="button" className={`mm-celda ${claro(c) ? 'mm-claro' : ''} ${sel ? 'mm-sel' : ''}`} style={{ background: fondo(c) }} aria-pressed={sel}
+                        onClick={() => setClase(sel ? '' : c.matriz)}
+                        title={`${c.matriz}: ${N(c.cambios)} cambios (${pct1(c.pMov)}) · ${hrs(c.minutos)} · ${N(c.skus)} de ${N(c.skusStock)} SKU se movieron · intensidad ${dec(c.idx)}×`}>
+                        <b>{a + z}</b><span className="mm-v">{fmt(c)}</span><small>{pct1(c.pMov)} de los cambios</small>
+                      </button>
+                    </td>);
+                })}</tr>))}</tbody>
+          </table>
+          {de('—')?.cambios > 0 && <p className="hint" style={{ marginTop: 6 }}>Sin clasificación: {N(de('—').cambios)} cambios ({hrs(de('—').minutos)}) de {N(de('—').skus)} SKU que no están en la Base vigente.</p>}
+        </div>
+        <div className="s7">
+          <TablaOrden filas={celdas.filter((c) => c.cambios || c.skusStock)} inicial={['minutos', -1]} clave={(c) => c.matriz} cols={[
+            ['matriz', 'Clase', false, (v) => <Abc m={v === '—' ? null : v} metodo={metodo} />], ['pStock', '% SKU', true, pct1], ['cambios', 'Cambios', true, N], ['pMov', '% cambios', true, pct1],
+            ['idx', 'Intensidad', true, (v) => <span className={v > 1.2 ? 'warn' : ''}>{v === null ? '—' : `${dec(v)}×`}</span>], ['porSku', 'Cambios / SKU', true, (v) => dec(v)],
+            ['entreCd', 'Entre CD', true, N], ['minutos', 'Horas', true, (v) => <b>{hrs(v)}</b>], ['horasDia', 'h / día', true, (v) => dec(v)]]} />
+        </div>
+      </div>
+      <h4 className="dash-sub" style={{ marginTop: 12 }}>Dónde actuar y cómo mitigar <small>las 3 categorías con más tiempo y las que se mueven 1,5× o más de su peso</small></h4>
+      <ol className="mm-sug">{foco.map((c) => (
+        <li key={c.matriz}>
+          <div className="mm-sug-h"><Abc m={c.matriz === '—' ? null : c.matriz} metodo={metodo} /> <b>{hrs(c.minutos)}</b> <span className="muted">· {N(c.cambios)} cambios · {pct1(c.pMin)} del tiempo · intensidad {dec(c.idx)}× · reducirlos a la mitad libera ≈ {hrs(c.minutos / 2)} ({dec(div(c.minutos / 2 / 60, (M.dias || 1) * 8))} personas por día)</span></div>
+          <ul>{sugerencia(c, T).map((t, i) => <li key={i}>{t}</li>)}</ul>
+        </li>))}</ol>
+      <p className="hint">Tiempo estimado: un cambio dentro del CD = sacar + almacenar = {dec(T.dentro)} min{T.medido ? ` (2 × ${dec(T.ciclo)} min, la mediana entre almacenamientos consecutivos del mismo operario en ALM_USER, ${N(T.n)} registros)` : ' (fijado en Datos)'}; entre CD se suman {dec(T.extraEntreCd)} min de traslado. Ambos se ajustan en Datos, Metas y calendario. Es una estimación: los cambios se detectan por día con las fotos de stock y no traen hora ni operario.</p>
+    </Card>
+  );
 }
 
 const TIPO_FLUJO = { traslado: ['Traslado', '--blue'], entrada: ['Entrada', '--teal'], salida: ['Salida', '--slate'] };
@@ -143,11 +240,12 @@ function Recorrido({ h, cds }) {
   };
   const chip = (n) => <span className="flujo-chip" style={{ '--c': `var(${col(n)})` }}>{n === SALIDA ? 'Salida' : n}</span>;
   const ini = stockCd(h.fechas[0]);
+  // el día más reciente primero; el inicio del período queda al final
   return (
+    <div className="flujo-wrap">
+      <div className="flujo-enc" aria-hidden="true"><span>Fecha</span><span>Movimientos del día (origen → destino, unidades)</span><span>Stock al cierre por CD</span></div>
     <ol className="flujo-dias">
-      <li><div className="flujo-f">{dm(h.fechas[0])}</div><div className="flujo-mov muted">Inicio del período</div>
-        <div className="flujo-st">{Object.entries(ini).map(([c, q]) => <span key={c}>{chip(c)} {N(q)}</span>)}</div></li>
-      {[...dias].sort(([a], [b]) => a.localeCompare(b)).map(([fecha, g]) => {
+      {[...dias].sort(([a], [b]) => b.localeCompare(a)).map(([fecha, g]) => {
         const st = stockCd(fecha);
         return (
           <li key={fecha}>
@@ -158,7 +256,10 @@ function Recorrido({ h, cds }) {
             <div className="flujo-st" title="Stock del SKU en cada CD después de los movimientos del día">{Object.keys(st).length ? Object.entries(st).sort(([a], [b]) => cds.indexOf(a) - cds.indexOf(b)).map(([c, q]) => <span key={c}>{chip(c)} {N(q)}</span>) : <span className="muted">sin stock</span>}</div>
           </li>);
       })}
+      <li><div className="flujo-f">{dm(h.fechas[0])}</div><div className="flujo-mov muted">Inicio del período</div>
+        <div className="flujo-st">{Object.entries(ini).map(([c, q]) => <span key={c}>{chip(c)} {N(q)}</span>)}</div></li>
     </ol>
+    </div>
   );
 }
 
@@ -211,6 +312,7 @@ export default function InventarioMovimientos() {
   const [filtro, setFiltro] = useState({ desde: '', hasta: '', cd: '', zona: '', depto: '', buscar: '' });
   const [busca, setBusca] = useState('');
   const [sku, setSku] = useState('');
+  const [clase, setClase] = useState('');
   const d = useCarga(() => api.get(`/continuidad/inventario/movimientos?${new URLSearchParams(filtro)}`), [filtro]);
   const r = d.data;
   if (!r) return <><PageHead title="Movimientos de SKU" /><Cargando error={d.error} />{!d.error && <p className="hint">La primera vez se comparan todas las fotos de stock; puede tardar unos segundos.</p>}</>;
@@ -272,10 +374,13 @@ export default function InventarioMovimientos() {
               ['almacenamiento', 'Almacenamientos', true, N], ['vaciada', 'Ubicaciones vaciadas', true, N]]} />
           </Card>
 
-          <Card title="SKU con más cambios de ubicación" hint={`${N(r.totalSkus)} SKU cambiaron de ubicación${r.totalSkus > r.skus.length ? ` (se muestran los ${N(r.skus.length)} con más cambios)` : ''}. Clic en el SKU para ver su historia.`}
+          {r.matriz && <MatrizMov M={{ ...r.matriz, dias: r.pares }} metodo={r.matriz.metodo || 'rotacion'} clase={clase} setClase={setClase} />}
+
+          <Card title={`SKU con más cambios de ubicación${clase ? ` · clase ${clase}` : ''}`} hint={`${N(r.totalSkus)} SKU cambiaron de ubicación${r.totalSkus > r.skus.length ? ` (se muestran los ${N(r.skus.length)} con más cambios)` : ''}. Clic en el SKU para ver su historia.`}
             actions={<button type="button" className="ghost" onClick={() => descargar([['SKU', 'Descripción', 'Depto', 'ABC / XYZ', 'CD', 'Cambios de ubicación', 'Días con cambios', 'Entre CD', 'Ubicaciones distintas', 'Almacenamientos', 'Vaciadas', 'Último cambio'],
               ...r.skus.map((x) => [x.sku, x.desc, x.depto, x.abc || '', x.cds, x.cambios, x.dias, x.entreCd, x.ubicaciones, x.almacenamiento, x.vaciada, x.ultimo])], `movimientos_sku_${r.desde}_${r.hasta}.csv`)}>Descargar CSV</button>}>
-            <TablaOrden filas={r.skus} inicial={['cambios', -1]} max={100} clave={(x) => x.sku} cols={[
+            {clase && <p className="hint">Filtrado por la clase {clase}: {N(r.skus.filter((x) => (x.abc || '—') === clase).length)} SKU del ranking. <button type="button" className="link" onClick={() => setClase('')}>Quitar filtro</button></p>}
+            <TablaOrden filas={clase ? r.skus.filter((x) => (x.abc || '—') === clase) : r.skus} inicial={['cambios', -1]} max={100} clave={(x) => x.sku} cols={[
               ['sku', 'SKU', false, linkSku], ['desc', 'Descripción', false, (v) => <span style={{ fontSize: 12.5 }}>{v || '—'}</span>], ['depto', 'Depto', false, (v) => <span style={{ fontSize: 12.5 }}>{v || '—'}</span>], ['abc', 'ABC / XYZ', false, (v) => <Abc m={v} />], ['cds', 'CD'],
               ['cambios', 'Cambios', true, (v) => <b>{N(v)}</b>], ['dias', 'Días con cambios', true, N], ['entreCd', 'Entre CD', true, N], ['ubicaciones', 'Ubic. distintas', true, N],
               ['almacenamiento', 'Almac.', true, N], ['vaciada', 'Vaciadas', true, N], ['ultimo', 'Último cambio', false, (v) => (v ? dm(v) : '—')]]} />
@@ -283,13 +388,6 @@ export default function InventarioMovimientos() {
 
           <div id="mov-historia">{sku && <Historia sku={sku} desde={r.desde} hasta={r.hasta} cerrar={() => setSku('')} />}</div>
 
-          <Card title="Ubicaciones con más rotación" hint={`Por cuántos SKU distintos pasó cada ubicación (entraron) y cuántos movimientos tuvo. ${N(r.totalUbic)} ubicaciones con movimiento${r.totalUbic > r.ubic.length ? ` (se muestran ${N(r.ubic.length)})` : ''}.`}
-            actions={<button type="button" className="ghost" onClick={() => descargar([['CD', 'Ubicación', 'Zona', 'SKU distintos', 'Entradas', 'Salidas', 'Movimientos', 'Por traslado'],
-              ...r.ubic.map((x) => [x.cd, x.ubicacion, x.zona, x.skus, x.entradas, x.salidas, x.mov, x.traslados])], `ubicaciones_rotacion_${r.desde}_${r.hasta}.csv`)}>Descargar CSV</button>}>
-            <TablaOrden filas={r.ubic} inicial={['skus', -1]} max={50} clave={(x) => `${x.cd}|${x.ubicacion}`} cols={[
-              ['cd', 'CD'], ['ubicacion', 'Ubicación'], ['zona', 'Zona'], ['skus', 'SKU distintos', true, (v) => <b>{N(v)}</b>], ['entradas', 'Entradas', true, N],
-              ['salidas', 'Salidas', true, N], ['mov', 'Movimientos', true, N], ['traslados', 'Por traslado', true, N]]} />
-          </Card>
           <p className="hint">Resolución diaria: si un SKU se movió dos veces en el mismo día, se ve solo dónde quedó. La clase (cambio de ubicación, almacenamiento o vaciada) se deduce del stock total del SKU en todos los CD: {Object.values(CLASE).map(([t, , a]) => `${t}: ${a.charAt(0).toLowerCase()}${a.slice(1)}`).join(' ')}</p>
         </>}
       </>}
