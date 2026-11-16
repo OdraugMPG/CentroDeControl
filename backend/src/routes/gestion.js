@@ -18,12 +18,15 @@ import { configEventos, guardarConfigEventos, restablecerConfigEventos, deptosEv
 import { cargarVentaCd, borrarVentaCd, participacion, archivoParticipacion } from '../gestion/services/participacionCd.js';
 import { potencialOsr, archivoPotencialOsr } from '../gestion/services/potencialOsr.js';
 import { sugerenciaOsr } from '../gestion/services/sugerenciaOsr.js';
+import { pickingOsr } from '../gestion/services/pickingOsr.js';
+import { historiaOsr } from '../gestion/services/historiaOsr.js';
 import { sugeridoTotes } from '../gestion/services/reabastoTotes.js';
+import { recallTotes, archivoRecallTotes, cargarSlotsOsr, borrarSlotsOsr } from '../gestion/services/recallTotes.js';
 import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr, cargarCapacidadOsr, borrarCapacidadOsr, capacidadOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
 import { hoyIso, up } from '../gestion/engine/util.js';
 import { usuarioDe } from './util.js';
-import { personal, guardarEmpresa, guardarPersona, bajaPersona, guardarRotacion, guardarRotacionEmpresa } from '../services/personal.js';
+import { personal, guardarEmpresa, guardarPersona, bajaPersona, guardarRotacion, guardarRotacionEmpresa, validarRotacion } from '../services/personal.js';
 
 const app = Router();
 const subir = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
@@ -151,6 +154,13 @@ app.post('/optimizacion/osr/capacidad/cargar', subir.single('archivo'), r(async 
   return cargarCapacidadOsr(req.file.buffer, nombreArchivo(req.file));
 }));
 app.post('/optimizacion/osr/capacidad/borrar', r(() => borrarCapacidadOsr()));
+app.post('/optimizacion/osr/recall', r((req) => recallTotes(req.body || {})));
+app.post('/optimizacion/osr/recall/cargar', subir.single('archivo'), r(async (req) => {
+  if (!req.file) throw Object.assign(new Error('Adjunta el archivo de stock del OSR (KiSoft).'), { status: 400 });
+  return cargarSlotsOsr(req.file.buffer, nombreArchivo(req.file), req.body?.fecha);
+}));
+app.post('/optimizacion/osr/recall/borrar', r((req) => borrarSlotsOsr(req.body?.fecha)));
+app.get('/optimizacion/osr/recall/excel', r(async (req, res) => enviarXlsx(res, await archivoRecallTotes(req.query))));
 app.get('/optimizacion/osr/totes/excel', r(async (req, res) => {
   const q2 = { ...req.query, pot: req.query.pot ? JSON.parse(req.query.pot) : {} };
   return enviarXlsx(res, await archivoTotesOsr(q2));
@@ -178,6 +188,8 @@ app.post('/participacion/venta', subir.single('archivo'), r(async (req) => {
 app.post('/participacion/venta/borrar', r(() => borrarVentaCd()));
 app.post('/participacion/simular', r((req) => participacion(req.body || {})));
 app.post('/participacion/sugerencia', r((req) => sugerenciaOsr(req.body || {})));
+app.post('/participacion/picking', r((req) => pickingOsr(req.body || {})));
+app.get('/osr/historia', r((req) => historiaOsr(req.query || {})));
 app.get('/participacion/excel', r(async (req, res) => enviarXlsx(res, await archivoParticipacion({ ...req.query, soloOsr: req.query.soloOsr === '1' }))));
 app.get('/optimizacion/eventos/config', r(() => configEventos()));
 app.post('/optimizacion/eventos/config', r((req) => guardarConfigEventos(req.body || {})));
@@ -218,6 +230,7 @@ app.put('/config/empresas/:id', r((req) => guardarEmpresa(+req.params.id, req.bo
 app.post('/config/personal', r((req) => guardarPersona(null, req.body || {})));
 app.put('/config/personal/:id', r((req) => guardarPersona(+req.params.id, req.body || {})));
 app.delete('/config/personal/:id', r((req) => bajaPersona(+req.params.id)));
+app.post('/config/rotacion-validar', r((req) => validarRotacion(req.body || {})));
 app.put('/config/rotacion/:grupo', r((req) => guardarRotacion(req.params.grupo, req.body || {})));
 app.put('/config/rotacion-empresa/:id', r((req) => guardarRotacionEmpresa(+req.params.id, req.body || {})));
 app.get('/config/ciclo', r(async () => (await q('SELECT cd, count(*)::int AS zonas, max(fecha) AS ultima FROM avance_inventario GROUP BY cd ORDER BY cd')).rows));

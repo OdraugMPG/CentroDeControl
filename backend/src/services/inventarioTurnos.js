@@ -54,9 +54,14 @@ const cargaPorUbic = (filas, cd) => {
 
 /** Grupos de CE de un día y CD, con sus HH, repartidos en los turnos del día (mismo reparto que el plan diario) */
 export async function planInventarioCe({ fecha, cd, filas, p, recInv, nTur }) {
-  const { rows } = await q(`SELECT pasillo AS zp, max(zona) AS zona, max(piso) AS piso, array_agg(ubicacion) AS ubics
-    FROM inv_programa WHERE fecha_op = $1 AND NOT excluida AND coalesce(cd_op, '${SIN_CD}') = $2 GROUP BY pasillo`, [fecha, cd]);
+  const { rows } = await q(`SELECT p.pasillo AS zp, max(p.zona) AS zona, max(p.piso) AS piso, array_agg(p.ubicacion) AS ubics, max(t.orden) AS tt
+    FROM inv_programa p LEFT JOIN inv_turno_pasillo tp ON tp.fecha_op = p.fecha_op AND tp.cd = coalesce(p.cd_op, '${SIN_CD}') AND tp.pasillo = p.pasillo
+    LEFT JOIN turnos t ON t.id = tp.turno
+    WHERE p.fecha_op = $1 AND NOT p.excluida AND coalesce(p.cd_op, '${SIN_CD}') = $2 GROUP BY p.pasillo`, [fecha, cd]);
   if (!rows.length) return null;
+  // turno del Calendario de planificación (1, 2, 3): el sábado puede tener más turnos de inventario que de operación
+  const conTurno = rows.some((r) => r.tt);
+  if (conTurno && nTur > 0) nTur = Math.max(nTur, ...rows.map((r) => r.tt || 0));
   const hT = p.horasTurno > 0 ? p.horasTurno : 8;
   const rec = Math.max(1, Math.min(recInv || 1, p.invMax > 0 ? p.invMax : 6));
   const pu = cargaPorUbic(filas || [], cd);
@@ -64,14 +69,17 @@ export async function planInventarioCe({ fecha, cd, filas, p, recInv, nTur }) {
     let lin = 0, uni = 0;
     for (const u of r.ubics) { const x = pu.get(u); if (x) { lin += x.skus.size; uni += x.uni; } }
     const ub = r.ubics.length;
-    return { zp: r.zp, zona: r.zona, piso: r.piso || '', ub, lin, uni, hh: (ub * p.invSegUb + lin * p.invSegSku + uni * p.invSegUn + p.invSegPas) / 3600 };
-  }).sort((a, b) => cmp(`${a.piso}|${a.zp}`, `${b.piso}|${b.zp}`));
+    return { zp: r.zp, zona: r.zona, piso: r.piso || '', ub, lin, uni, tt: Math.min(r.tt || 1, Math.max(1, nTur)), hh: (ub * p.invSegUb + lin * p.invSegSku + uni * p.invSegUn + p.invSegPas) / 3600 };
+  }).sort((a, b) => a.tt - b.tt || cmp(`${a.piso}|${a.zp}`, `${b.piso}|${b.zp}`));
   const ord = grupos.map((_, k) => k);
   const lin = [], fin = new Array(grupos.length).fill(0);
   // meta por turno: el total parejo entre los turnos del día (con un margen mínimo para no dejar restos por redondeo), tope la capacidad
   const totHH = grupos.reduce((a, g) => a + g.hh, 0);
-  const meta = nTur > 0 ? Math.min(rec * hT, (totHH / nTur) * 1.001 + EPS) : 0;
-  if (nTur > 0) programar('INVENTARIO', ord, grupos.map((g) => g.hh), new Array(grupos.length).fill(1), meta, hT, rec, fin, lin, nTur);
+  // con turnos del calendario, la meta alcanza para la carga del turno más cargado (cada pasillo empieza en su turno)
+  const porTurno = {};
+  for (const g of grupos) porTurno[g.tt] = (porTurno[g.tt] || 0) + g.hh;
+  const meta = nTur > 0 ? Math.min(rec * hT, (conTurno ? Math.max(...Object.values(porTurno)) : totHH / nTur) * 1.001 + EPS) : 0;
+  if (nTur > 0) programar('INVENTARIO', ord, grupos.map((g) => g.hh), grupos.map((g) => (conTurno ? g.tt : 1)), meta, hT, rec, fin, lin, nTur);
   const asignado = new Array(grupos.length).fill(0);
   const lineas = lin.map((l, i) => {
     const g = grupos[l.z]; asignado[l.z] += l.hh;
@@ -114,7 +122,7 @@ export async function simularDia(fecha) {
     const pl = await planInventarioCe({ fecha, cd, filas, p, recInv: c?.rec_inv || 1, nTur: cd === SIN_CD ? 0 : nTur });
     if (!pl) continue;
     const resp = await responsablesTurno(fecha, cd, c);
-    const turnos = Array.from({ length: nTur }, (_, i) => {
+    const turnos = Array.from({ length: Math.max(nTur, pl.nTur || 0) }, (_, i) => {
       const tt = i + 1, ls = pl.lineas.filter((l) => l.turno === tt);
       return { tt, ...resp[tt], hh: ls.reduce((a, l) => a + l.hh, 0), ubicaciones: ls.reduce((a, l) => a + l.ubicaciones, 0),
         // personas que necesita el turno
@@ -122,7 +130,7 @@ export async function simularDia(fecha) {
     });
     out.push({ cd, activo: !!c?.activo, recInv: pl.recInv, hT: pl.hT, capacidad: pl.capacidad, resumen: pl.resumen, turnos, pendientes: pl.pendientes });
   }
-  return { fecha, nTur, base: carga || null, param: { invSegUb: p.invSegUb, invSegSku: p.invSegSku, invSegUn: p.invSegUn, invSegPas: p.invSegPas, horasTurno: p.horasTurno }, cds: out };
+  return { fecha, nTur: Math.max(nTur, ...out.map((x) => x.turnos.length)), base: carga || null, param: { invSegUb: p.invSegUb, invSegSku: p.invSegSku, invSegUn: p.invSegUn, invSegPas: p.invSegPas, horasTurno: p.horasTurno }, cds: out };
 }
 
 /** Avance de las tareas de inventario de CE publicadas: ubicaciones del grupo contadas ese día en el resultado de la toma */

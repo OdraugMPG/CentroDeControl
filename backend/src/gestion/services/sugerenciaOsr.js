@@ -15,6 +15,7 @@ import { capacidadTotes, empaque } from './potencialOsr.js';
 import { capacidadOsr } from './totesOsr.js';
 import { up } from '../engine/util.js';
 import { leerParametros } from './parametros.js';
+import { diasPeriodo } from './pickingOsr.js';
 
 const LIMITE = 400;
 const OLAS = [
@@ -71,7 +72,7 @@ export async function sugerenciaOsr(params = {}) {
   let ocupMax = Number(params.ocupMax);
   if (!(ocupMax > 0)) ocupMax = 0.85;
   if (ocupMax > 1) ocupMax /= 100;
-  const dias = Math.max(1, d.porDia.filter((x) => x.fecha).length);
+  const dias = await diasPeriodo(d, params);
   const { sim, cdObj } = d;
 
   const [caps, cap] = await Promise.all([capacidades(), capacidadOsr({ target: ocupMax })]);

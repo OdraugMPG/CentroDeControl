@@ -16,6 +16,31 @@ const nocheTxt = (n) => `Noche ${n} semanas (lun. a vie.) → PM → AM / PM cad
 const reglaTxt = (f) => { if (f.activo && f.tipo === 'noche_mensual') return nocheTxt(f.noche_semanas); const fijos = f.turnos.filter((t) => !f.activo || !f.ciclo.includes(t)); return f.activo && f.ciclo.length > 1
   ? `${f.ciclo.join(' ↔ ')} rotan cada ${f.semanas === 1 ? 'semana' : `${f.semanas} semanas`}${fijos.length ? ` · ${fijos.join(', ')} fijo` : ''}` : `Sin rotación: cada persona queda en su turno (${f.turnos.join(', ')})`; };
 
+/** Validación legal de la regla (Código del Trabajo): se recalcula mientras se edita, antes de guardar */
+function Legal({ regla }) {
+  const [v, setV] = useState(null);
+  const [ver, setVer] = useState(false);
+  const clave = JSON.stringify(regla);
+  useEffect(() => {
+    const t = setTimeout(() => api.post('/api/config/rotacion-validar', regla).then(setV).catch(() => setV(null)), 350);
+    return () => clearTimeout(t);
+  }, [clave]);   // eslint-disable-line react-hooks/exhaustive-deps
+  if (!v || v.sinTurnos || !v.reglas.length) return null;
+  const malas = v.reglas.filter((x) => !x.ok), avisos = v.reglas.filter((x) => x.ok && x.aviso);
+  const est = malas.length ? 'bad' : avisos.length ? 'warn' : 'good';
+  return (
+    <div className={'legal legal-' + est}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <b>{malas.length ? `✗ No cumple la jornada legal (${malas.length})` : avisos.length ? '! Cumple, con observaciones' : '✓ Cumple la jornada legal'}</b>
+        {v.reglas.map((x) => <span key={x.clave} className={'legal-chip ' + (!x.ok ? 'bad' : x.aviso ? 'warn' : 'good')} title={x.detalle}>{!x.ok ? '✗' : x.aviso ? '!' : '✓'} {x.nombre}: {x.valor}</span>)}
+        <button type="button" className="link" onClick={() => setVer(!ver)}>{ver ? 'Ocultar detalle' : 'Ver detalle'}</button>
+      </div>
+      {ver && <ul className="legal-det">{v.reglas.map((x) => <li key={x.clave}><b>{x.nombre}</b>: {x.detalle}</li>)}</ul>}
+      {malas.length > 0 && <div className="note" style={{ margin: '4px 0 0' }}>No se puede guardar así: ajusta la regla o los límites legales en Datos → Configuración.</div>}
+    </div>
+  );
+}
+
 function TipoRotacion({ f, setF }) {
   return <>
     <div><div className="lbl">Tipo de rotación</div><select value={f.tipo} disabled={!f.activo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
@@ -131,6 +156,7 @@ function Rotacion({ grupo, titulo, rol, d, recargar }) {
       <p className="note" style={{ margin: '6px 0 8px' }}>{f.activo && f.tipo === 'noche_mensual' ? `${nocheTxt(f.noche_semanas)}. El equipo de cada persona sale de su turno de esta semana.` : f.activo
         ? `El turno cambia los lunes: cada persona que rota avanza al siguiente turno del ciclo cada ${f.semanas === 1 ? 'semana' : `${f.semanas} semanas`}. El turno de esta semana de cada uno se mantiene al guardar.`
         : 'Sin rotación automática: cada persona queda en el turno que se le asigna.'}</p>
+      <Legal regla={{ activo: f.activo, tipo: f.tipo, noche_semanas: f.noche_semanas, ciclo, semanas: f.semanas, inicio: f.inicio }} />
       {lista.length > 0 && <div className="tbl"><table>
         <thead><tr><th>Nombre</th>{rol !== 'Supervisor' && <th>Empresa</th>}<th>CD</th>{d.semanas.map((s, i) => <th key={s} className="c" style={i === 0 ? { background: 'var(--band)' } : undefined}>{i === 0 ? 'Esta semana' : `Sem. ${dm(s)}`}</th>)}</tr></thead>
         <tbody>{lista.map((p) => <tr key={p.id}><td>{p.nombre}{!p.rota && <span className="note"> (fijo)</span>}</td>{rol !== 'Supervisor' && <td>{p.empresa}</td>}<td>{p.cd || 'Todos'}</td>
@@ -171,6 +197,7 @@ function FormEmpresa({ e, d, onGuardar, boton }) {
       </>}
       <div><div className="lbl">{noche ? 'La noche actual empezó la semana del' : 'Desde la semana del'}</div><input type="date" value={f.inicio} disabled={!f.activo} onChange={(ev) => setF({ ...f, inicio: ev.target.value })} /></div>
       <button type="button" className="btn primary" disabled={!valido} onClick={() => onGuardar(f)}>{boton}</button>
+      <div style={{ flexBasis: '100%' }}><Legal regla={{ turnos: f.turnos, activo: f.activo, tipo: f.tipo, noche_semanas: f.noche_semanas, ciclo: f.ciclo, semanas: f.semanas, inicio: f.inicio }} /></div>
       <span className="note" style={{ flexBasis: '100%', margin: 0 }}>{reglaTxt(f)}{noche && f.turnos.length < orden.length ? '. Para la noche mensual la empresa debe operar los tres turnos.' : f.activo && !noche && f.ciclo.length < 2 ? '. Marca al menos dos turnos que roten.' : '.'}</span>
     </div>
   );

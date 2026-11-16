@@ -52,7 +52,17 @@ export const PARAMETROS = {
   metaCumplimiento: 0.95,    // dashboard gerencial: meta de cumplimiento productivo (unidades / meta por hora)
   metaProgramacionCe: 0.9,   // dashboard gerencial: meta de accuracy de la programación de CE
   movMinDentro: 0,           // movimientos de SKU: minutos por cambio de ubicación dentro del CD (0 = medido con ALM_USER)
-  movMinExtraEntreCd: 5      // movimientos de SKU: minutos que se suman a un cambio entre CD (traslado)
+  movMinExtraEntreCd: 5,     // movimientos de SKU: minutos que se suman a un cambio entre CD (traslado)
+  // rotación de turnos: límites legales (Código del Trabajo); se validan al guardar una rotación
+  legalJornadaSemanal: 42,   // horas ordinarias por semana (Ley 21.561: 42 h desde 26-04-2026, 40 h desde 26-04-2028)
+  legalColacionMin: 30,      // minutos de colación dentro del turno (no imputables a la jornada)
+  legalMaxExtraSemana: 12,   // horas extra máximas por semana
+  legalMaxExtraDia: 2,       // horas extra máximas por día
+  legalMaxHorasDia: 10,      // horas ordinarias máximas por día
+  legalMaxDiasSemana: 6,     // días trabajados máximos por semana
+  legalDescansoMinH: 12,     // horas mínimas de descanso entre el fin de un turno y el inicio del siguiente
+  legalMaxDomingosSeguidos: 3, // domingos seguidos trabajados como máximo
+  legalMinDomingosLibresMes: 2 // domingos libres mínimos en el mes calendario (art. 38)
 };
 
 export async function seed() {

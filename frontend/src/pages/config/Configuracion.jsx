@@ -16,7 +16,13 @@ const PARAMS = {
   metaCumplimiento: ['Dashboard gerencial: meta de cumplimiento productivo', 'proporción, 0,95 = 95%'],
   metaProgramacionCe: ['Dashboard gerencial: meta de accuracy de la programación de CE', 'proporción, 0,9 = 90%'],
   movMinDentro: ['Movimientos de SKU: minutos por cambio de ubicación dentro del CD', '0 = medido con ALM_USER (2 × ciclo de almacenamiento)'],
-  movMinExtraEntreCd: ['Movimientos de SKU: minutos extra por cambio entre CD', 'traslado entre CD']
+  movMinExtraEntreCd: ['Movimientos de SKU: minutos extra por cambio entre CD', 'traslado entre CD'],
+  legalJornadaSemanal: ['Rotación: jornada ordinaria semanal', 'horas (42 h; 40 h desde el 26-04-2028)'],
+  legalColacionMin: ['Rotación: colación dentro del turno', 'minutos, no imputables a la jornada'],
+  legalMaxExtraSemana: ['Rotación: horas extra máximas por semana', 'horas'], legalMaxExtraDia: ['Rotación: horas extra máximas por día', 'horas'],
+  legalMaxHorasDia: ['Rotación: horas ordinarias máximas por día', 'horas'], legalMaxDiasSemana: ['Rotación: días trabajados máximos por semana', 'días'],
+  legalDescansoMinH: ['Rotación: descanso mínimo entre jornadas', 'horas entre el fin de un turno y el inicio del siguiente'],
+  legalMaxDomingosSeguidos: ['Rotación: domingos seguidos trabajados (máx.)', 'domingos'], legalMinDomingosLibresMes: ['Rotación: domingos libres al mes (mín.)', 'domingos, art. 38']
 };
 
 export default function Configuracion() {

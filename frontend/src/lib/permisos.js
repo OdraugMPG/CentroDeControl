@@ -16,7 +16,8 @@ export const MODULOS = [
   // Sloting: las vistas siguen en /gestion y con sus permisos de Gestión diaria
   ['slot', 'Sloting', [
     ['/gestion/slow', 'Slow moving', 'gd.slow'], ['/gestion/abc', 'ABC / XYZ', 'gd.abc'], ['/gestion/optimizacion', 'Optimización ABC', 'gd.optimizacion'],
-    ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion'],
+    ['/gestion/osr', 'Abastecimiento OSR', 'gd.osr'], ['/gestion/osr-historia', 'Evolución OSR', 'gd.osr'], ['/gestion/participacion', 'Participación por CD', 'gd.participacion'],
+    ['/gestion/osr-headcount', 'OSR y headcount', 'gd.participacion'],
     // Movimientos de SKU: su ruta sigue en /inventario y con su permiso de Gestión de inventario
     ['/inventario/movimientos', 'Movimientos de SKU', 'co.inventario.movimientos']]],
   ['cont', 'Continuidad', [

@@ -1,6 +1,6 @@
 // Sugerencia de aumento de la participación del OSR (Participación por CD): qué SKU ingresar o ampliar en OSR, cuántas
 // ubicaciones nuevas en tote half / quarter hacen falta, si caben en el OSR y cuántos operarios de picking manual se liberan
-// en los demás CD. Usa los mismos filtros de la simulación de arriba.
+// en los demás CD. Usa los mismos filtros de la vista (Sloting → OSR y headcount); con el comparativo de picking muestra el headcount total por escalón.
 import React, { useState } from 'react';
 import { api, fmt, pct } from './api.js';
 import { toast } from './ui.jsx';
@@ -77,7 +77,44 @@ function descargarCsv(filas, nombre) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-export default function SugerenciaOsr({ cuerpo }) {
+const nomEsc = (e, target) => (e.target ? `Target ${pct(target)}` : e.paso ? `Llegar a ${e.paso}` : e.fin === 'aptos' ? 'Todos los aptos (sin habilitar)' : 'Habilitando no aptos');
+
+/** Headcount total de picking (manual fuera del OSR + estaciones OSR) hoy y en cada escalón de participación. */
+function CurvaHeadcount({ esc, pk, target }) {
+  const filas = [{ nom: 'Hoy', uDia: 0, opManual: 0, opOsr: 0, hoy: true }, ...esc.map((e) => ({ ...e, nom: nomEsc(e, target) }))].map((e) => {
+    const man = Math.max(0, pk.fuera.operarios - e.opManual), osr = pk.osr.operarios + e.opOsr;
+    return { ...e, man, osr, tot: man + osr, part: pk.total.uDia ? (pk.osr.uDia + e.uDia) / pk.total.uDia : 0 };
+  });
+  const max = Math.max(1e-9, ...filas.map((x) => x.tot));
+  const hoy = filas[0];
+  const apt = filas.find((x) => x.fin === 'aptos') || filas[filas.length - 1];
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="row spread" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <h4 style={{ margin: 0 }}>Headcount de picking según la participación del OSR</h4>
+        <div className="legend"><span className="lg serie-2-f">Picking manual (fuera del OSR)</span><span className="lg serie-1-f">Estaciones OSR</span></div>
+      </div>
+      <div className="ho-curva">
+        {filas.map((x, i) => (
+          <div key={i} className={'ho-c-fila' + (x.target ? ' sel' : '')}>
+            <span className="ho-c-lbl">{x.nom}<small>OSR {pct(x.part)} del picking</small></span>
+            <div className="ho-c-barra" role="img" aria-label={`${x.nom}: ${op(x.man)} manual + ${op(x.osr)} OSR = ${op(x.tot)} operarios-turno por día`}>
+              <i className="ho-man" style={{ width: `${(x.man / max) * 100}%` }} title={`Picking manual: ${op(x.man)} operarios-turno/día`} />
+              <i className="ho-osr" style={{ width: `${(x.osr / max) * 100}%` }} title={`Estaciones OSR: ${op(x.osr)} operarios-turno/día`} />
+            </div>
+            <span className="ho-c-v"><b>{op(x.tot)}</b>{!x.hoy && <small style={{ color: 'var(--good)' }}> −{op(hoy.tot - x.tot)}</small>}</span>
+          </div>))}
+      </div>
+      <p className="note">
+        Operarios-turno/día de todo el picking (todos los SKU y CD de arriba). Hoy: {op(hoy.man)} en picking manual + {op(hoy.osr)} en el OSR = <b>{op(hoy.tot)}</b>.
+        {apt && !apt.hoy && <> Llevando al OSR todos los SKU con Logística OSR = Y que hoy se pickean fuera, el OSR pasa a {pct(apt.part)} del picking y el headcount baja a <b>{op(apt.tot)}</b> (−{op(hoy.tot - apt.tot)}, {pct(hoy.tot ? (hoy.tot - apt.tot) / hoy.tot : 0)}).</>}
+        {' '}Cada unidad que pasa al OSR deja de pedir horas de picking manual y pide muchas menos en las estaciones.
+      </p>
+    </div>
+  );
+}
+
+export default function SugerenciaOsr({ cuerpo, picking }) {
   const [c, setC] = useState({ cob: 7, almac: 'AUTO', pickUnHH: '', osrUnHH: '', ocupMax: 85 });
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
@@ -225,6 +262,8 @@ export default function SugerenciaOsr({ cuerpo }) {
         </div>
       </div>
 
+      {picking && <CurvaHeadcount esc={r.escalones} pk={picking} target={r.target} />}
+
       <h4 style={{ margin: '18px 0 8px' }}>Escalones de participación</h4>
       <div className="tbl">
         <table>
@@ -234,7 +273,7 @@ export default function SugerenciaOsr({ cuerpo }) {
             const [cl, tx] = ESPACIO[e.espacio] || ESPACIO['SIN DATO'];
             return (
               <tr key={i} className={e.target ? 'sel' : ''}>
-                <td>{e.target ? <b>Target {pct(r.target)}</b> : e.paso ? `Llegar a ${e.paso}` : e.fin === 'aptos' ? 'Todos los aptos (sin habilitar)' : 'Habilitando no aptos'}</td>
+                <td>{e.target ? <b>{nomEsc(e, r.target)}</b> : nomEsc(e, r.target)}</td>
                 <td className="num"><b>{pct(e.pct)}</b></td>
                 <td className="num" title={`${fmt(e.porOla[0])} a ingresar · ${fmt(e.porOla[1])} a ampliar · ${fmt(e.porOla[2])} a habilitar`}>{fmt(e.skus)}</td>
                 <td className="num">{fmt(e.ubicaciones)}</td><td className="num">{fmt(e.comps.QUARTER)}</td><td className="num">{fmt(e.comps.HALF)}</td><td className="num">{fmt(e.comps.ENTERO)}</td>

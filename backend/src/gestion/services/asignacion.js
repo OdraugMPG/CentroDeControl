@@ -73,7 +73,8 @@ export async function generarAsignacion(fecha, { forzar = false } = {}) {
       L('INFO', cd, `Ciclo de inventario completo (${pl.resumen.zonasCiclo} zonas). Se reinició el ciclo.`);
       pl = planificarDia({ filas, cd, reservadas, excluido: p.excluidos.has(cd), hechas, fecha, p, modo: p.modoTareas, recInv: c.rec_inv, recCon: c.op_cons });
     }
-    const nTur = pl.nTurnosDia;
+    // el inventario de CE puede usar más turnos que la operación (sábado con 3 turnos de inventario en el calendario)
+    const nTur = pl.nTurnosDia ? Math.max(pl.nTurnosDia, ce?.nTur || 0) : 0;
     if (!nTur) { L('INFO', cd, 'Hoy no hay turnos en el calendario.'); continue; }
     pl.lineas.forEach((l) => plan.push({ cd, ...l }));
     const r = pl.resumen;

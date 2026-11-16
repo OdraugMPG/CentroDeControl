@@ -99,8 +99,11 @@ async function guardarPrograma(crudas, archivo, todo = false) {
   let reemplazadas = 0, ajustadas = 0;
   await tx(async (c) => {
     // cada carga reemplaza todo el rango de fechas programadas que cubre (las asignaciones van aparte y se conservan)
-    reemplazadas = (todo ? await c.query('DELETE FROM inv_programa')
-      : await c.query('DELETE FROM inv_programa WHERE fecha_prog BETWEEN $1 AND $2', [pDesde, pHasta])).rowCount;
+    reemplazadas = (todo ? await c.query("DELETE FROM inv_programa WHERE archivo IS DISTINCT FROM 'WEB'")
+      : await c.query("DELETE FROM inv_programa WHERE fecha_prog BETWEEN $1 AND $2 AND archivo IS DISTINCT FROM 'WEB'", [pDesde, pHasta])).rowCount;
+    // las asignaciones de pasillos hechas en la web se conservan, salvo las ubicaciones que el Excel trae en su rango (manda el archivo)
+    reemplazadas += (await c.query("DELETE FROM inv_programa WHERE archivo = 'WEB' AND fecha_ce BETWEEN $1 AND $2 AND ubicacion = ANY($3::text[])",
+      [pDesde, pHasta, [...new Set(filas.map((f) => f.ubicacion))]])).rowCount;
     const sql = `INSERT INTO inv_programa (${COLS.join(', ')}, archivo) SELECT *, $${COLS.length + 1} FROM unnest(${COLS.map((k, i) => `$${i + 1}::${TIPO[k] || 'text'}[]`).join(', ')})`;
     for (let i = 0; i < filas.length; i += LOTE) {
       const lote = filas.slice(i, i + LOTE);

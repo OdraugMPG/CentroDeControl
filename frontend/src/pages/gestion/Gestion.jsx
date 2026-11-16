@@ -15,6 +15,8 @@ import AbcXyz from './AbcXyz.jsx';
 import Optimizacion from './Optimizacion.jsx';
 import AbastecimientoOsr from './AbastecimientoOsr.jsx';
 import ParticipacionCd from './ParticipacionCd.jsx';
+import HeadcountOsr from './HeadcountOsr.jsx';
+import HistoriaOsr from './HistoriaOsr.jsx';
 import Config from './Config.jsx';
 import './gestion.css';
 
@@ -22,8 +24,10 @@ import './gestion.css';
 const VISTAS_GD = [
   ['', Hoy, 'gd.asignacion'], ['tareas', Tareas, 'gd.tareas'], ['conciliacion', Conciliacion, 'gd.conciliacion'],
   ['turno', MiTurno, 'gd.turno'], ['cierre', Cierre, 'gd.cierre'], ['slow', Slow, 'gd.slow'], ['abc', AbcXyz, 'gd.abc'],
-  ['optimizacion', Optimizacion, 'gd.optimizacion'], ['osr', AbastecimientoOsr, 'gd.osr'], ['participacion', ParticipacionCd, 'gd.participacion'], ['config', Config, 'gd.config']
+  ['optimizacion', Optimizacion, 'gd.optimizacion'], ['osr', AbastecimientoOsr, 'gd.osr'], ['osr-historia', HistoriaOsr, 'gd.osr'], ['participacion', ParticipacionCd, 'gd.participacion'], ['osr-headcount', HeadcountOsr, 'gd.participacion'], ['config', Config, 'gd.config']
 ];
+// Vistas que no usan la jornada (analizan las Bases y la venta cargadas): no muestran su selector
+const SIN_JORNADA = new Set(['osr-historia']);
 // Nombres de las vistas en el proyecto original (para irA)
 const ALIAS = { hoy: '', opt: 'optimizacion' };
 
@@ -44,10 +48,10 @@ export default function Gestion() {
 
   return (
     <div className="gd">
-      <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
+      {!SIN_JORNADA.has(vista) && <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
         <label className="lbl" htmlFor="gd-fecha" style={{ margin: 0 }}>Jornada</label>
         <input id="gd-fecha" type="date" value={fecha} style={{ width: 'auto' }} onChange={e => setFecha(e.target.value || hoyIso())} />
-      </div>
+      </div>}
       <Vista fecha={fecha} rol={usuario.rolAcceso} irA={irA} />
     </div>
   );

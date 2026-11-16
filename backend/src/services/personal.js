@@ -9,6 +9,7 @@ import { q, tx } from '../db.js';
 import { q as qg } from '../gestion/db.js';
 import { cat } from '../lib/catalogos.js';
 import { addDias, fechaOperativa } from '../lib/turnos.js';
+import { validarPosiciones, legalParams } from '../lib/jornadaLegal.js';
 
 export const GRUPOS = { SUP_PARIS: 'Supervisores Paris', JEFE_EMPRESA: 'Jefes de turno de empresa externa', SUP_EMPRESA: 'Supervisores de empresa externa' };
 export const ROL_GRUPO = { Supervisor: 'SUP_PARIS', 'Jefe de Turno Empresa': 'JEFE_EMPRESA', 'Supervisor Empresa': 'SUP_EMPRESA' };
@@ -52,6 +53,34 @@ function baseDe(turno, rota, rot, fecha) {
   if (!turno || !rota || !rot?.activo) return turno || null;
   const i = rot.ciclo.indexOf(turno);
   return i < 0 ? turno : rot.ciclo[mod(i - pasos(rot, fecha), rot.ciclo.length)];
+}
+
+// Posiciones de una regla para la validación legal: cada equipo de la noche mensual, cada turno base del ciclo y cada
+// turno que la regla deja fijo (los que se operan y no rotan)
+function posicionesDe(rot, operados) {
+  if (esNoche(rot)) return [1, 2, 3].map((e) => ({ nombre: `Equipo ${e}`, turnoSemana: (f) => turnoEquipo(rot, e, f) }));
+  const ciclo = rot?.activo ? (rot.ciclo || []).filter((t) => operados.includes(t)) : [];
+  const rota = ciclo.length >= 2 ? ciclo : [];
+  const r = { ...rot, ciclo: rota };
+  return [...rota.map((b) => ({ nombre: `Quien parte en ${b}`, turnoSemana: (f) => turnoEn({ turno_base: b, rota: true }, r, f) })),
+    ...operados.filter((t) => !rota.includes(t)).map((t) => ({ nombre: `${t} fijo`, turnoSemana: () => t }))];
+}
+async function legalDe(rot, operados) {
+  const c = await cat();
+  return validarPosiciones(posicionesDe(rot, operados), c, legalParams(c.p), await hoy());
+}
+const errLegal = (v) => bad(`La rotación no cumple la jornada legal: ${v.reglas.filter((x) => !x.ok).map((x) => `${x.nombre.toLowerCase()} ${x.valor}`).join('; ')}. Ajusta la regla o los límites en Configuración.`);
+
+/** Validación legal de una regla sin guardarla (para ver el resultado mientras se edita) */
+export async function validarRotacion(b = {}) {
+  const T = (await q('SELECT id FROM turnos ORDER BY orden')).rows.map((x) => x.id);
+  const operados = T.filter((t) => (Array.isArray(b.turnos) && b.turnos.length ? b.turnos : T).includes(t));
+  const tipo = b.tipo === 'noche_mensual' ? 'noche_mensual' : 'ciclo';
+  const rot = { activo: !!b.activo, tipo, noche_semanas: Math.min(8, Math.max(1, Math.round(+b.noche_semanas || 4))), T,
+    ciclo: tipo === 'noche_mensual' ? T : (Array.isArray(b.ciclo) ? b.ciclo : []).filter((t, i, a) => operados.includes(t) && a.indexOf(t) === i),
+    semanas: Math.min(12, Math.max(1, Math.round(+b.semanas || 1))), inicio: /^\d{4}-\d{2}-\d{2}$/.test(b.inicio || '') ? lunes(b.inicio) : lunes(await hoy()) };
+  if (tipo === 'noche_mensual' && operados.length < T.length) return { ok: true, reglas: [], sinTurnos: true };
+  return legalDe(rot, operados);
 }
 
 const leerRotacion = async () => {
@@ -113,8 +142,13 @@ export async function personal(semanas = 8) {
   ]);
   const inicio = lunes(f);
   const sem = Array.from({ length: semanas }, (_, i) => addDias(inicio, 7 * i));
+  // validación legal de cada regla guardada
+  const T = turnos.rows.map((x) => x.id);
+  const legal = { grupos: {}, emp: {} };
+  for (const g of Object.keys(GRUPOS)) if (rot[g]) legal.grupos[g] = await legalDe(rot[g], T);
+  for (const [id, r] of Object.entries(rot.emp)) legal.emp[id] = r.tipo === 'noche_mensual' && r.activo && r.turnos.length < T.length ? { ok: true, reglas: [] } : await legalDe(r, r.turnos);
   return {
-    hoy: f, semanas: sem, grupos: GRUPOS, rolGrupo: ROL_GRUPO, rotacion: rot, rotEmpresa: rot.emp, empresas: empresas.rows, turnos: turnos.rows,
+    hoy: f, semanas: sem, legal, grupos: GRUPOS, rolGrupo: ROL_GRUPO, rotacion: rot, rotEmpresa: rot.emp, empresas: empresas.rows, turnos: turnos.rows,
     cds: [...new Set([...cdsG.rows, ...cdsI.rows].map((x) => x.cd))].sort(),
     personas: ps.map((p) => ({ ...p, calendario: sem.map((s) => turnoEn(p, rotDe(p, rot), s)) }))
   };
@@ -189,6 +223,8 @@ export async function guardarRotacion(grupo, b) {
   const rot = await leerRotacion();
   const ps = (await leerPersonas()).filter((p) => ROL_GRUPO[p.rol] === grupo && (p.rol === 'Supervisor' || !rot.emp[p.empresa_id]));
   const nueva = { activo: !!b.activo, tipo, noche_semanas: nocheSem, ciclo, semanas, inicio, T: rot.SUP_PARIS?.T || ciclo };
+  const v = await legalDe(nueva, turnos.length ? (await q('SELECT id FROM turnos ORDER BY orden')).rows.map((x) => x.id) : ciclo);
+  if (!v.ok) throw errLegal(v);
   await tx(async (c) => {
     await c.query('UPDATE rotacion SET activo = $2, ciclo = $3, semanas = $4, inicio = $5, tipo = $6, noche_semanas = $7 WHERE grupo = $1', [grupo, nueva.activo, ciclo, semanas, inicio, tipo, nocheSem]);
     for (const p of ps) { const u = ubicar(p.turno_id, p.rota, nueva, f); await c.query('UPDATE personas SET turno_base = $2, equipo = $3 WHERE id = $1', [p.id, u.base, u.equipo]); }
@@ -216,6 +252,8 @@ export async function guardarRotacionEmpresa(id, b) {
   const f = await hoy();
   const inicio = /^\d{4}-\d{2}-\d{2}$/.test(b.inicio || '') ? lunes(b.inicio) : lunes(f);
   const nueva = { activo, tipo, noche_semanas: nocheSem, ciclo: ciclo.length ? ciclo : turnos.slice(0, 2), semanas, inicio, T: todos };
+  const v = await legalDe(nueva, turnos);
+  if (!v.ok) throw errLegal(v);
   // se conserva el turno de esta semana de cada persona de la empresa
   const ps = (await leerPersonas()).filter((p) => p.rol !== 'Supervisor' && p.empresa_id === id);
   await tx(async (c) => {

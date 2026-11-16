@@ -19,7 +19,7 @@ export const PERMISOS = [
     ['co.inventario', 'Inventario CD (ver)'],
     ['co.inventario.cargar', 'Inventario CD: cargar programación de CE y resultado de la toma'], ['co.inventario.asignar', 'Inventario CD: asignar jefe de turno de la empresa y supervisor'],
     ['co.inventario.calendario', 'Inventario CD: ver programación y avance'], ['co.inventario.resultados', 'Inventario CD: ver resultados ERI / ERU y diferencias'],
-    ['co.inventario.planificar', 'Calendario de planificación: reprogramar y quitar ubicaciones'],
+    ['co.inventario.planificar', 'Calendario de planificación: asignar pasillos, reprogramar y quitar ubicaciones'],
     ['co.inventario.dashboard', 'Dashboard de inventario: ERI / ERU, resultado neto y absoluto, top de SKU y ABC / XYZ'],
     ['co.inventario.validacion', 'Validación de la toma: primera, segunda y tercera pasada'],
     ['co.inventario.comparacion', 'Toma CE vs operación: comparar la toma oficial de Control de Existencia con la de la operación'],
@@ -66,7 +66,7 @@ export const REGLAS = [
   R('PUT', '/continuidad/asistencia', 'co.turno', 'co.dotacion'),
   R('POST', '/continuidad/inventario/importar', 'co.inventario.cargar'),
   R('PUT', '/continuidad/inventario/asignacion', 'co.inventario.asignar'),
-  R('POST', '/continuidad/inventario/(reprogramar|quitar|restaurar)', 'co.inventario.planificar'),
+  R('POST', '/continuidad/inventario/(reprogramar|quitar|restaurar|asignar-pasillos|repartir-turnos|turno-pasillo)', 'co.inventario.planificar'),
   // Gestión diaria
   R('POST', '/gestion/cargas/inicio', 'gd.asignacion.base', 'da.cargas'),
   R('POST', '/gestion/asignaciones', 'gd.asignacion.generar'),

@@ -6,6 +6,7 @@ import { api, qs, urlApi, fmt, fFecha } from './api.js';
 import { IrACarga, toast } from './ui.jsx';
 import Grafico from '../../components/Grafico.jsx';
 import { css } from '../../lib/fmt.js';
+import RecallTotes from './RecallTotes.jsx';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 
@@ -1297,6 +1298,19 @@ function TotesOsr() {
   );
 }
 
+// Optimización de totes: capacidad y reempaque por SKU (distribución de totes) u ocupación por tote y recall (stock de KiSoft)
+function PestanaTotes() {
+  const [sub, setSub] = useState('recall');
+  return (
+    <>
+      <div className="chips" style={{ marginBottom: 10 }}>
+        {[['recall', 'Ocupación de totes y recall'], ['reempaque', 'Capacidad y reempaque']].map(([k, t]) => <button key={k} className="chip" aria-pressed={sub === k} onClick={() => setSub(k)}>{t}</button>)}
+      </div>
+      {sub === 'recall' ? <RecallTotes /> : <TotesOsr />}
+    </>
+  );
+}
+
 const PESTANAS = [['eventos', 'Simulador de eventos'], ['reabasto', 'Reabasto por proyección'], ['potencial', 'Potencial fuera de OSR'], ['totes', 'Optimización de totes'], ['rotacion', 'Ingreso de alta rotación']];
 
 export default function AbastecimientoOsrVista() {
@@ -1310,7 +1324,7 @@ export default function AbastecimientoOsrVista() {
       {vista === 'eventos' && <SimuladorEventos />}
       {vista === 'reabasto' && <ReabastoProyeccion />}
       {vista === 'potencial' && <PotencialOsr />}
-      {vista === 'totes' && <TotesOsr />}
+      {vista === 'totes' && <PestanaTotes />}
       {vista === 'rotacion' && <IngresoOsr />}
     </>
   );

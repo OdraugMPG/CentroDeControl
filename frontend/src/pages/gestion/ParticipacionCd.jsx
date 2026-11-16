@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, pct, fFecha } from './api.js';
 import { IrACarga, toast } from './ui.jsx';
-import SugerenciaOsr from './SugerenciaOsr.jsx';
 
 const tono = (m) => 'm-' + ('ABC'.indexOf(m[0]) + 'XYZ'.indexOf(m[1]));
 const TIPOS = [['TAREA', 'Tarea'], ['ETIQUETA', 'Etiqueta'], ['TODOS', 'Ambos']];
@@ -17,7 +16,7 @@ const LECTURA_ESTADO = {
   'SIN VALIDAR (sin Base)': 'No hay Base de stock cargada: no se puede validar si son aptos ni si ya están en OSR.',
 };
 
-export default function ParticipacionCd() {
+export default function ParticipacionCd({ irA }) {
   const [f, setF] = useState({ tipo: 'TAREA', desde: '', hasta: '', cd: '', target: '', modo: 'total', excluir: [], soloOsr: false, depto: '', estado: '', temporada: 'AUTO', logOsr: 'Y' });
   const [lista, setLista] = useState('sel');
   const [rec, setRec] = useState(0);
@@ -187,7 +186,10 @@ export default function ParticipacionCd() {
               </div>
             </div>
 
-            <SugerenciaOsr cuerpo={{ ...cuerpo, excluir: f.excluir, estado: '' }} />
+            <div className="alert info" style={{ color: 'var(--ink)', marginTop: 18, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, minWidth: 240 }}>La sugerencia para subir la participación del OSR y bajar headcount, con el comparativo de picking desde el OSR vs fuera, está en <b>Sloting → OSR y headcount</b>.</span>
+              {irA && <button className="btn sm" onClick={() => irA('osr-headcount')}>Ir a OSR y headcount</button>}
+            </div>
 
             <div className="row spread" style={{ margin: '18px 0 8px' }}>
               <h3 style={{ margin: 0 }}>Apertura por departamento</h3>

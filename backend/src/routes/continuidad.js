@@ -12,7 +12,7 @@ import { dashboardInventario } from '../services/inventarioDashboard.js';
 import { validacionToma } from '../services/inventarioValidacion.js';
 import { comparacionCe, precisionProgramacion } from '../services/inventarioComparacion.js';
 import { movimientosSku, historiaSku } from '../services/movimientosSku.js';
-import { calendario, ubicacionesGrupo, reprogramar, quitar, restaurar } from '../services/inventarioCalendario.js';
+import { calendario, ubicacionesGrupo, reprogramar, quitar, restaurar, pasillosAsignables, asignarPasillos, repartirTurnos, turnoPasillo } from '../services/inventarioCalendario.js';
 import { ah, bad, fecha, turno, texto, usuarioDe } from './util.js';
 
 const r = Router();
@@ -255,6 +255,10 @@ r.get('/inventario/calendario/grupo', ah(async (req, res) => { res.json(await ub
 r.post('/inventario/reprogramar', ah(async (req, res) => { res.json(await reprogramar(req.body || {}, usuarioDe(req))); }));
 r.post('/inventario/quitar', ah(async (req, res) => { res.json(await quitar(req.body || {}, usuarioDe(req))); }));
 r.post('/inventario/restaurar', ah(async (req, res) => { res.json(await restaurar(req.body || {})); }));
+r.get('/inventario/calendario/pasillos', ah(async (req, res) => { res.json(await pasillosAsignables(req.query)); }));
+r.post('/inventario/asignar-pasillos', ah(async (req, res) => { res.json(await asignarPasillos(req.body || {}, usuarioDe(req))); }));
+r.post('/inventario/repartir-turnos', ah(async (req, res) => { res.json(await repartirTurnos(req.body || {}, usuarioDe(req))); }));
+r.post('/inventario/turno-pasillo', ah(async (req, res) => { res.json(await turnoPasillo(req.body || {}, usuarioDe(req))); }));
 r.put('/inventario/asignacion', ah(async (req, res) => { res.json(await asignar(req.body || {}, usuarioDe(req))); }));
 
 export default r;
