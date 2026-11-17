@@ -107,6 +107,76 @@ function Gerencial({ r }) {
   );
 }
 
+/** Foto elegida contra la anterior: cómo cambió el uso de los totes y si se aplicó el recall. */
+function Comparacion({ c }) {
+  const A = c.a, B = c.b;
+  // bueno = 1 si subir es bueno, -1 si bajar es bueno, 0 neutro
+  const fila = (nom, va, vb, { pct, bueno = 0, sub, d = 0 } = {}) => {
+    const dif = vb - va;
+    const cero = Math.abs(dif) < (pct ? 0.0005 : 0.5);
+    const cls = cero || !bueno ? '' : (dif > 0) === (bueno > 0) ? 'up' : 'dn';
+    return (
+      <tr key={nom} className={sub ? 'rt-sub' : ''}><td>{nom}</td>
+        <td className="num">{pct ? pct1(va) : fmt(va, d)}</td><td className="num"><b>{pct ? pct1(vb) : fmt(vb, d)}</b></td>
+        <td className="num">{cero ? <span className="muted">sin cambio</span> : <span className={'rt-d ' + cls}>{dif > 0 ? '+' : '−'}{pct ? `${fmt(Math.abs(dif) * 100, 1)} pts` : fmt(Math.abs(dif), d)}</span>}</td></tr>
+    );
+  };
+  const tp = (f, t) => f.porTipo.find((p) => p.tipo === t) || { totes: 0, util: 0, bajo25: 0, sobre100: 0 };
+  const tipos = A.porTipo.map((p) => [p.tipo, p.nom]);
+  const r = c.rec;
+  return (
+    <div className="rt-ger">
+      <h3 style={{ margin: '0 0 2px' }}>Comparación con el día anterior</h3>
+      <p className="rt-titular">Del {fFecha(c.fa)} al {fFecha(c.fb)} la utilización de los totes {Math.abs(B.util - A.util) < 0.0005 ? 'se mantuvo' : B.util > A.util ? 'subió' : 'bajó'} ({pct1(A.util)} → <b>{pct1(B.util)}</b>)
+        y los totes ocupados {B.totes >= A.totes ? 'aumentaron' : 'bajaron'} en <b>{fmt(Math.abs(B.totes - A.totes))}</b>.
+        De los {fmt(r.skus)} SKU que estaban en el recall, <b>{fmt(r.mejoraron)}</b> usan menos tote ({fmt(r.liberado, 0)} totes liberados) y {fmt(r.siguen)} siguen igual.</p>
+      <div className="viz-row" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)', alignItems: 'start' }}>
+        <div className="tbl">
+          <table className="rt-esc">
+            <thead><tr><th /><th className="num">{fFecha(c.fa)}</th><th className="num">{fFecha(c.fb)}</th><th className="num">Variación</th></tr></thead>
+            <tbody>
+              {fila('Utilización de los totes', A.util, B.util, { pct: true, bueno: 1 })}
+              {fila('Totes ocupados', A.totes, B.totes, { bueno: -1 })}
+              {tipos.map(([t, nom]) => fila(`${nom}: totes`, tp(A, t).totes, tp(B, t).totes, { sub: true }))}
+              {tipos.map(([t, nom]) => fila(`${nom}: utilización`, tp(A, t).util, tp(B, t).util, { pct: true, bueno: 1, sub: true }))}
+              {fila('Totes con uso hasta 25%', A.tramos['0-25'], B.tramos['0-25'], { bueno: -1 })}
+              {fila('Totes sobre 100% (revisar capacidad)', A.tramos['100+'], B.tramos['100+'], { bueno: -1 })}
+              {fila('Unidades', A.qty, B.qty)}
+              {fila('SKU', A.skus, B.skus)}
+              {fila('Compartimentos', A.slots, B.slots)}
+              {fila('Recall: totes a llamar', A.recall.totesLlamar, B.recall.totesLlamar, { bueno: -1 })}
+              {fila('Recall: totes que libera', A.recall.ahorro, B.recall.ahorro, { bueno: -1 })}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <table className="rt-esc">
+            <thead><tr><th>Movimientos</th><th className="num">Cantidad</th><th className="num">Unidades</th></tr></thead>
+            <tbody>
+              <tr><td>Totes nuevos (LOAD_UNIT que no estaba)</td><td className="num">{fmt(c.totes.nuevas)}</td><td /></tr>
+              <tr><td>Totes que ya no están</td><td className="num">{fmt(c.totes.salen)}</td><td /></tr>
+              {c.totes.cambia > 0 && <tr><td>Totes que cambiaron de tipo</td><td className="num">{fmt(c.totes.cambia)}</td><td /></tr>}
+              <tr><td>SKU que entraron al OSR</td><td className="num">{fmt(c.sk.entran)}</td><td className="num">{fmt(c.sk.uEntran)}</td></tr>
+              <tr><td>SKU que salieron del OSR</td><td className="num">{fmt(c.sk.salen)}</td><td className="num">{fmt(c.sk.uSalen)}</td></tr>
+              <tr className="rt-sub"><td>SKU con más unidades · con menos</td><td className="num">{fmt(c.sk.suben)} · {fmt(c.sk.bajan)}</td><td /></tr>
+            </tbody>
+          </table>
+          <table className="rt-esc" style={{ marginTop: 10 }}>
+            <thead><tr><th>Recall del {fFecha(c.fa)}</th><th className="num">SKU</th></tr></thead>
+            <tbody>
+              <tr><td>Usan menos tote<div className="note" style={{ margin: 0 }}>{fmt(r.liberado, 1)} totes liberados (por el recall o porque se vendió)</div></td><td className="num"><b>{fmt(r.mejoraron)}</b></td></tr>
+              <tr><td>Siguen igual (pendientes)</td><td className="num">{fmt(r.siguen)}</td></tr>
+              <tr><td>Salieron del OSR</td><td className="num">{fmt(r.salieron)}</td></tr>
+              <tr className="rt-sub"><td>Nuevos en el recall del {fFecha(c.fb)}</td><td className="num">{fmt(r.nuevos)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p className="note">Se compara la foto elegida con la foto anterior cargada. Verde = mejora, rojo = empeora. Un SKU del recall que hoy usa menos tote puede ser porque se reempacó o porque se pickeó y se vació un compartimento.</p>
+    </div>
+  );
+}
+
 function Evolucion({ r }) {
   if (r.evolucion.length < 2) return <p className="note">Evolución diaria: hay una sola foto cargada ({fFecha(r.fecha)}). Carga el archivo de KiSoft cada día para ver cómo cambia el uso de los totes.</p>;
   const ult = [...r.evolucion].reverse().slice(0, 31);
@@ -135,7 +205,7 @@ function Evolucion({ r }) {
 }
 
 export default function RecallTotes() {
-  const [f, setF] = useState({ fecha: '', llenado: '', minAhorro: '', maxTotes: '', tipo: '', depto: '', buscar: '', accion: 'RECALL' });
+  const [f, setF] = useState({ fecha: '', llenado: '', minAhorro: '', minTotes: '', maxTotes: '', tipo: '', depto: '', buscar: '', accion: 'RECALL' });
   const [r, cargando] = usar('/api/optimizacion/osr/recall', f, [JSON.stringify(f)]);
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
   if (!r) return <div className="sec"><p className="note">{cargando ? 'Calculando…' : ''}</p></div>;
@@ -162,17 +232,21 @@ export default function RecallTotes() {
       </div>
 
       {r.esc && <Gerencial r={r} />}
+      {r.comp && <Comparacion c={r.comp} />}
 
       <Ocupacion r={r} />
 
       <h3 style={{ margin: '18px 0 6px' }}>Recall para optimizar los totes</h3>
-      <p className="note" style={{ marginTop: 0 }}>Por SKU se calcula el empaque que usa menos tote para sus unidades: compartimentos Full, Half y Quarter con la capacidad del SKU en cada tipo, llenados hasta el {fmt(o.llenado * 100)}%. Si libera al menos {fmt(o.minAhorro, 2)} tote, sus totes se llaman a la puerta (recall) para consolidar o cambiar de tipo. Totes que libera = totes equivalentes (Half = ½, Quarter = ¼): los Half y Quarter de distintos SKU comparten tote.</p>
+      <p className="note" style={{ marginTop: 0 }}>Por SKU se calcula el empaque que usa menos tote para sus unidades: compartimentos Full, Half y Quarter con la capacidad del SKU en cada tipo, llenados hasta el {fmt(o.llenado * 100)}%, sin dejar el SKU en menos de {o.minTotes} {o.minTotes === 1 ? 'tote' : 'totes distintos'} (o los que tiene hoy si son menos): si la máquina falla en un tote, el SKU se puede pickear desde otro. Las unidades se reparten entre esos totes según su capacidad. Si libera al menos {fmt(o.minAhorro, 2)} tote, sus totes se llaman a la puerta (recall) para consolidar o cambiar de tipo. Totes que libera = totes equivalentes (Half = ½, Quarter = ¼): los Half y Quarter de distintos SKU comparten tote.</p>
       <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
         <div><label className="lbl" htmlFor="rt-ll">Llenado máximo al reempacar %</label>
           <input id="rt-ll" type="number" className="w90" min="50" max="100" placeholder="100" value={f.llenado} onChange={(e) => set('llenado')(e.target.value)} /></div>
         <div><label className="lbl" htmlFor="rt-ma">Liberar al menos (totes por SKU)</label>
           <select id="rt-ma" value={f.minAhorro} onChange={(e) => set('minAhorro')(e.target.value)}>
             <option value="">½ tote</option><option value="0.25">¼ tote</option><option value="0.75">¾ tote</option><option value="1">1 tote</option><option value="2">2 totes</option></select></div>
+        <div><label className="lbl" htmlFor="rt-mn" title="Para no depender de un solo tote si la máquina falla">Mínimo de totes por SKU</label>
+          <select id="rt-mn" value={f.minTotes} onChange={(e) => set('minTotes')(e.target.value)}>
+            <option value="">2 totes</option><option value="1">1 tote</option><option value="3">3 totes</option><option value="4">4 totes</option></select></div>
         <div><label className="lbl" htmlFor="rt-mt">Totes a llamar en el día</label>
           <input id="rt-mt" type="number" className="w90" min="1" placeholder="todos" value={f.maxTotes} onChange={(e) => set('maxTotes')(e.target.value)} /></div>
         <div><span className="lbl">Tipo de tote de hoy</span>

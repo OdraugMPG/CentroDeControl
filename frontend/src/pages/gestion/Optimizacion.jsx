@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api, qs, urlApi, fmt, fFecha } from './api.js';
 import { toast, useCarga } from './ui.jsx';
+import DispersionCds from './DispersionCd.jsx';
 
 const pc = (a, b, d = 1) => (b > 0 ? fmt((100 * a) / b, d) + '%' : '—');
 const TONO = { A: 'm-0', B: 'm-2', C: 'm-4' };
@@ -530,6 +531,7 @@ export default function Optimizacion({ irA }) {
       </div>
 
       <ConsolidacionCds />
+      <DispersionCds />
 
       <ConsolidacionInterna />
 

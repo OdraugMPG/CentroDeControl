@@ -124,7 +124,7 @@ function ocupacion(filas) {
     l.slots++; l.qty += x.qty;
     if (cap > 0) { l.uso += x.uso * fr; l.usoCap += Math.min(1, x.uso) * fr; } else l.sinCap = true;
   }
-  const nuevo = (t) => ({ tipo: t, nom: TIPOS[t]?.nom || t, totes: 0, slots: 0, slotsPosibles: 0, qty: 0, sumUso: 0, conCap: 0,
+  const nuevo = (t) => ({ tipo: t, nom: TIPOS[t]?.nom || t, totes: 0, slots: 0, slotsPosibles: 0, qty: 0, sumUso: 0, conCap: 0, usado: 0,
     tramos: Object.fromEntries([...TRAMOS.map((x) => [x[0], 0]), ['sin', 0]]) });
   const porTipo = new Map();
   const tot = { ...nuevo('TOTAL'), nom: 'Total' };
@@ -133,19 +133,23 @@ function ocupacion(filas) {
     let p = porTipo.get(l.tipo);
     if (!p) porTipo.set(l.tipo, p = nuevo(l.tipo));
     for (const a of [p, tot]) {
-      a.totes++; a.slots += l.slots; a.slotsPosibles += Math.max(TIPOS[l.tipo]?.slots || 1, l.slots); a.qty += l.qty; a.tramos[l.tramo]++;
+      a.totes++; a.slots += l.slots; a.slotsPosibles += Math.max(TIPOS[l.tipo]?.slots || 1, l.slots); a.qty += l.qty; a.tramos[l.tramo]++; a.usado += l.usoCap;
       if (!l.sinCap) { a.sumUso += Math.min(1, l.uso); a.conCap++; }
     }
   }
-  const fin = ({ sumUso, ...a }) => ({ ...a, usoProm: a.conCap ? sumUso / a.conCap : 0, slotsVacios: a.slotsPosibles - a.slots });
+  const fin = ({ sumUso, ...a }) => ({ ...a, usoProm: a.conCap ? sumUso / a.conCap : 0, util: a.totes ? a.usado / a.totes : 0, slotsVacios: a.slotsPosibles - a.slots });
   return { lus, porTipo: [...porTipo.values()].sort((a, b) => ordTipo(a.tipo) - ordTipo(b.tipo)).map(fin), tot: fin(tot) };
 }
 
 /** Empaque que usa menos tote para Q unidades con las capacidades (por compartimento) de cada tipo; empate: menos compartimentos. */
-function optimo(Q, C1, C2, C4) {
+// m = mínimo de compartimentos (totes distintos) en que debe quedar el SKU: si la máquina falla en un tote, el SKU se puede
+// pickear desde otro. Si una combinación queda con menos, se completa con compartimentos del tipo más chico disponible.
+function optimo(Q, C1, C2, C4, m = 1) {
   if (!(Q > 0)) return { a: 0, b: 0, c: 0, eq: 0, n: 0 };
   let best = null;
   const prueba = (a, b, c) => {
+    const falta = m - (a + b + c);
+    if (falta > 0) { if (C4 > 0) c += falta; else if (C2 > 0) b += falta; else a += falta; }
     const eq = a + b / 2 + c / 4, n = a + b + c;
     if (!best || eq < best.eq - EPS || (Math.abs(eq - best.eq) < EPS && n < best.n)) best = { a, b, c, eq, n };
   };
@@ -185,7 +189,9 @@ function recallSkus(filas, lus, o) {
   const out = [];
   for (const s of m.values()) {
     const C1 = Math.floor(s.c111 * ll), C2 = Math.floor(s.c121 * ll), C4 = Math.floor(s.c141 * ll);
-    const op = C1 > 0 || C2 > 0 || C4 > 0 ? optimo(s.qty, C1, C2, C4) : null;
+    const nHoy = s.hoy.a + s.hoy.b + s.hoy.c;
+    s.minN = Math.max(1, Math.min(o.minTotes, nHoy, Math.floor(s.qty)));
+    const op = C1 > 0 || C2 > 0 || C4 > 0 ? optimo(s.qty, C1, C2, C4, s.minN) : null;
     let accion = 'OK', ahorro = 0;
     if (!op) accion = 'SIN_CAP';
     else {
@@ -219,12 +225,12 @@ function escenario(filas, lus, skus, aplica, o) {
   }
   for (const s of skus) {
     if (!aplica.has(s.sku) || !s.op) continue;
-    let resto = s.qty;
-    for (const [t, n, cap] of [['111', s.op.a, s.c111], ['121', s.op.b, s.c121], ['141', s.op.c, s.c141]]) {
-      const ce = Math.floor(cap * o.llenado);
+    // las unidades se reparten en proporción a la capacidad de cada compartimento (ninguno queda vacío)
+    const comps = [['111', s.op.a, s.c111], ['121', s.op.b, s.c121], ['141', s.op.c, s.c141]];
+    const capTot = comps.reduce((a, [, n, cap]) => a + n * cap, 0);
+    for (const [t, n, cap] of comps) {
       for (let i = 0; i < n; i++) {
-        const u = Math.min(resto, i === n - 1 && t === '141' ? resto : ce);
-        resto -= u;
+        const u = capTot ? (s.qty * cap) / capTot : 0;
         pool[t].n++; pool[t].usado += cap > 0 ? Math.min(1, u / cap) * TIPOS[t].frac : 0;
       }
     }
@@ -250,6 +256,46 @@ async function escenarios(filas, lus, skus, lista, o, tope) {
   return { lista: l, osr: cap.cargada ? { positions: cap.tot.positions, occupied: cap.tot.occupied, target: cap.target, archivo: cap.archivo } : null };
 }
 
+/** Foto elegida contra la foto anterior cargada: totes, utilización y tramos, movimientos de totes y SKU, y qué pasó con el recall. */
+async function comparacion(fechas, fecha, o, filasB, ocB, skusB) {
+  const i = fechas.indexOf(fecha);
+  if (i < 1) return null;
+  const fa = fechas[i - 1];
+  const filasA = (await filasDe(fa)).map((x) => ({ ...x }));
+  const ocA = ocupacion(filasA);
+  const skusA = recallSkus(filasA, ocA.lus, o);
+  const foto = (oc, filas, skus) => {
+    const rc = resumenRecall(skus);
+    return { totes: oc.tot.totes, slots: oc.tot.slots, qty: oc.tot.qty, skus: new Set(filas.map((x) => x.sku)).size, util: oc.tot.util, usoProm: oc.tot.usoProm,
+      tramos: oc.tot.tramos, porTipo: oc.porTipo.map((p) => ({ tipo: p.tipo, nom: p.nom, totes: p.totes, util: p.util, qty: p.qty, bajo25: p.tramos['0-25'], sobre100: p.tramos['100+'] })),
+      recall: { totesLlamar: rc.totesLlamar, ahorro: rc.ahorro, skus: rc.skus } };
+  };
+  // totes que entran, salen o cambian de tipo
+  let nuevas = 0, salen = 0, cambia = 0;
+  for (const [k, l] of ocB.lus) { const a = ocA.lus.get(k); if (!a) nuevas++; else if (a.tipo !== l.tipo) cambia++; }
+  for (const k of ocA.lus.keys()) if (!ocB.lus.has(k)) salen++;
+  // SKU que entran y salen del OSR
+  const suma = (filas) => { const m = new Map(); for (const x of filas) m.set(x.sku, (m.get(x.sku) || 0) + x.qty); return m; };
+  const qa = suma(filasA), qb = suma(filasB);
+  const sk = { entran: 0, uEntran: 0, salen: 0, uSalen: 0, suben: 0, bajan: 0 };
+  for (const [k, u] of qb) { const a = qa.get(k); if (a === undefined) { sk.entran++; sk.uEntran += u; } else if (u > a) sk.suben++; else if (u < a) sk.bajan++; }
+  for (const [k, u] of qa) if (!qb.has(k)) { sk.salen++; sk.uSalen += u; }
+  // ¿se aplicó el recall del día anterior?
+  const enRecall = (s) => s.accion === 'CONSOLIDAR' || s.accion === 'REEMPACAR';
+  const bM = new Map(skusB.map((s) => [s.sku, s]));
+  const aM = new Map(skusA.map((s) => [s.sku, s]));
+  const rec = { skus: 0, mejoraron: 0, liberado: 0, siguen: 0, salieron: 0, nuevos: 0 };
+  for (const s of skusA) {
+    if (!enRecall(s)) continue;
+    rec.skus++;
+    const b = bM.get(s.sku);
+    if (!b) rec.salieron++;
+    else if (b.eqHoy < s.eqHoy - EPS) { rec.mejoraron++; rec.liberado += s.eqHoy - b.eqHoy; } else rec.siguen++;
+  }
+  for (const s of skusB) if (enRecall(s) && !(aM.get(s.sku) && enRecall(aM.get(s.sku)))) rec.nuevos++;
+  return { fa, fb: fecha, a: foto(ocA, filasA, skusA), b: foto(ocB, filasB, skusB), totes: { nuevas, salen, cambia }, sk, rec };
+}
+
 function resumenRecall(skus) {
   const porAccion = Object.fromEntries(Object.keys(ACCIONES).map((k) => [k, { skus: 0, totes: 0, ahorro: 0, qty: 0 }]));
   const llamar = new Set();
@@ -265,13 +311,15 @@ const opciones = (p = {}) => {
   let llenado = Number(p.llenado); if (!(llenado > 0)) llenado = 100; if (llenado > 1) llenado /= 100;
   let tope = Number(p.tope); if (!(tope > 0)) tope = 25; if (tope > 1) tope /= 100;
   const minAhorro = p.minAhorro === '' || p.minAhorro === undefined || p.minAhorro === null ? 0.5 : Math.max(0.25, Number(p.minAhorro) || 0.5);
-  return { llenado: Math.min(1, llenado), tope, minAhorro };
+  const minTotes = p.minTotes === '' || p.minTotes === undefined || p.minTotes === null ? 2 : Math.max(1, Math.min(4, Math.round(Number(p.minTotes)) || 2));
+  return { llenado: Math.min(1, llenado), tope, minAhorro, minTotes };
 };
 
+const VERSION = 2; // cambia cuando cambia el cálculo: los resúmenes guardados de otra versión se recalculan
 function resumenDe(filas) {
   const oc = ocupacion(filas);
   const r = resumenRecall(recallSkus(filas, oc.lus, opciones()));
-  return { ocup: { porTipo: oc.porTipo, tot: oc.tot }, recall: { ahorro: r.ahorro, skus: r.skus, totesLlamar: r.totesLlamar } };
+  return { v: VERSION, ocup: { porTipo: oc.porTipo, tot: oc.tot }, recall: { ahorro: r.ahorro, skus: r.skus, totesLlamar: r.totesLlamar } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -339,6 +387,13 @@ async function calcular(params = {}) {
     x.skus++; x.totes += s.lus.length; x.ahorro += s.ahorro; pd.set(d, x);
   }
   const esc = await escenarios(filas, oc.lus, todos, lista, o, tope);
+  const comp = await comparacion(cargas.map((c) => c.fecha), fecha, o, filas, oc, todos);
+  for (const c of cargas) {
+    const r0 = typeof c.resumen === 'string' ? JSON.parse(c.resumen) : c.resumen;
+    if (r0?.v === VERSION) continue;
+    c.resumen = resumenDe((await filasDe(c.fecha)).map((x) => ({ ...x })));
+    await q('UPDATE osr_slots_carga SET resumen = $2 WHERE fecha = $1', [c.fecha, JSON.stringify(c.resumen)]);
+  }
   const evolucion = cargas.map((c) => {
     const r = typeof c.resumen === 'string' ? JSON.parse(c.resumen) : c.resumen;
     return { fecha: c.fecha, porTipo: r.ocup?.porTipo || [], tot: r.ocup?.tot || null, recall: r.recall || null };
@@ -347,7 +402,7 @@ async function calcular(params = {}) {
     cargada: true, fecha, fechas: cargas.map((c) => c.fecha), archivo: carga.archivo, cargado: carga.cargado, opciones: o,
     tipos: TIPOS, tramos: TRAMOS.map(([k, n]) => ({ k, n })), acciones: ACCIONES,
     ocup: { porTipo: oc.porTipo, tot: oc.tot }, resumen, accion, maxTotes: tope, lista, limite: LIM,
-    porDepto: [...pd.values()].sort((a, b) => b.ahorro - a.ahorro), deptos: [...new Set(filas.map((x) => x.depto))].sort(), evolucion, esc, filas, lusM: oc.lus,
+    porDepto: [...pd.values()].sort((a, b) => b.ahorro - a.ahorro), deptos: [...new Set(filas.map((x) => x.depto))].sort(), evolucion, esc, comp, filas, lusM: oc.lus,
   };
 }
 
@@ -373,11 +428,11 @@ export async function archivoRecallTotes(params = {}) {
   const pct = (v) => (v === null || v === undefined ? '' : Math.round(v * 1000) / 10);
   const det = [['Prioridad', 'En el plan', 'SKU', 'Descripción', 'Depto', 'Acción', 'Hoy', 'Propuesta', 'Totes que libera el SKU', 'LOAD_UNIT', 'SLOT', 'Tipo', 'Unidades', 'Capacidad del tipo', 'Uso compartimento %', 'Uso del tote %']];
   const res = [['Prioridad', 'SKU', 'Descripción', 'Depto', 'Acción', 'Unidades', 'Hoy', 'Totes hoy (equiv.)', 'Propuesta', 'Totes propuesta (equiv.)', 'Totes que libera', 'Totes a llamar',
-    'Totes a llamar acum.', 'Liberado acum.', 'Cap. Full', 'Cap. Half', 'Cap. Quarter', 'Compart. sobre 100%', 'Fecha almac. más antigua']];
+    'Totes a llamar acum.', 'Liberado acum.', 'Cap. Full', 'Cap. Half', 'Cap. Quarter', 'Compart. sobre 100%', 'Fecha almac. más antigua', 'LOAD_UNIT (totes)']];
   r.lista.forEach((s, i) => {
     const ac = ACCIONES[s.accion];
     res.push([i + 1, s.sku, s.nombre, s.depto, ac, s.qty, layTxt(s.hoy), s.eqHoy, s.op ? layTxt(s.op) : '', s.op ? s.op.eq : '', s.ahorro, s.lus.length, s.acTotes, s.acAhorro,
-      s.c111, s.c121, s.c141, s.sobre, s.falm ? fmtFecha(s.falm) : '']);
+      s.c111, s.c121, s.c141, s.sobre, s.falm ? fmtFecha(s.falm) : '', [...s.lus].sort().join(', ')]);
     if (s.accion !== 'CONSOLIDAR' && s.accion !== 'REEMPACAR') return;
     for (const x of (porSku.get(s.sku) || []).sort((a, b) => (a.lu < b.lu ? -1 : 1) || a.slot - b.slot)) {
       det.push([i + 1, s.enPlan ? 'SI' : 'NO', s.sku, s.nombre, s.depto, ac, layTxt(s.hoy), s.op ? layTxt(s.op) : '', s.ahorro, x.lu, x.slot, TIPOS[x.tipo]?.nom || x.tipo, x.qty,
@@ -388,6 +443,6 @@ export async function archivoRecallTotes(params = {}) {
   for (const p of [...r.ocup.porTipo, r.ocup.tot]) oc.push([p.tipo === 'TOTAL' ? 'Total' : `${p.tipo} ${p.nom}`, p.totes, p.slots, p.slotsVacios, p.qty, pct(p.usoProm), ...TRAMOS.map((t) => p.tramos[t[0]]), p.tramos.sin]);
   const hojas = [];
   if (det.length > 1) hojas.push(['Recall', det, [9, 9, 12, 34, 22, 16, 18, 18, 10, 12, 6, 9, 9, 10, 10, 10]]);
-  hojas.push(['SKU', res, [9, 12, 34, 22, 22, 9, 18, 10, 18, 10, 10, 9, 10, 10, 8, 8, 8, 10, 12]], ['Ocupacion', oc, [14, 9, 12, 12, 10, 10, 11, 11, 11, 11, 11, 12]]);
+  hojas.push(['SKU', res, [9, 12, 34, 22, 22, 9, 18, 10, 18, 10, 10, 9, 10, 10, 8, 8, 8, 10, 12, 60]], ['Ocupacion', oc, [14, 9, 12, 12, 10, 10, 11, 11, 11, 11, 11, 12]]);
   return { buffer: libro(hojas), nombre: `Recall_totes_OSR_${r.fecha}.xlsx` };
 }

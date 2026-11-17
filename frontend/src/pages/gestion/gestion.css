@@ -387,3 +387,19 @@
 .gd .rt-d{display:inline-block;font-size:11px;font-weight:600;margin-left:4px}
 .gd .rt-d.up{color:var(--green)}
 .gd .rt-d.dn{color:var(--red)}
+.gd .dp-par{display:grid;gap:3px;min-width:170px}
+.gd .dp-par>div{display:flex;align-items:center;gap:6px}
+.gd .dp-par i{display:block;height:7px;border-radius:3px;flex:0 0 auto;max-width:110px}
+.gd .dp-par>div i{width:0}
+.gd .dp-par span{font-size:11.5px;min-width:42px}
+.gd .dp-par>div{position:relative}
+.gd .dp-s{background:var(--slate)}
+.gd .dp-v{background:var(--teal)}
+.gd .dp-ley{display:inline-flex;align-items:center;gap:5px;font-weight:inherit}
+.gd .dp-ley i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-left:4px}
+.gd .dp-d{font-weight:600}
+.gd .dp-d.up{color:var(--green)}
+.gd .dp-d.dn{color:var(--red)}
+.gd .dp-sku td,.gd .dp-sku th{white-space:nowrap}
+.gd .dp-sku td.wrap{white-space:normal;min-width:220px}
+.gd .dp-sku td.dp-mal{background:color-mix(in srgb, var(--red) 12%, transparent)}

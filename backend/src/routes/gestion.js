@@ -21,6 +21,7 @@ import { sugerenciaOsr } from '../gestion/services/sugerenciaOsr.js';
 import { pickingOsr } from '../gestion/services/pickingOsr.js';
 import { historiaOsr } from '../gestion/services/historiaOsr.js';
 import { sugeridoTotes } from '../gestion/services/reabastoTotes.js';
+import { dispersionCds, archivoDispersionCds } from '../gestion/services/dispersionCd.js';
 import { recallTotes, archivoRecallTotes, cargarSlotsOsr, borrarSlotsOsr } from '../gestion/services/recallTotes.js';
 import { totesOsr, archivoTotesOsr, cargarDistribucionOsr, borrarDistribucionOsr, cargarCapacidadOsr, borrarCapacidadOsr, capacidadOsr } from '../gestion/services/totesOsr.js';
 import { leerReservadas } from '../gestion/engine/base.js';
@@ -167,6 +168,8 @@ app.get('/optimizacion/osr/totes/excel', r(async (req, res) => {
 }));
 app.get('/optimizacion/osr/potencial/excel', r(async (req, res) => enviarXlsx(res, await archivoPotencialOsr(req.query))));
 app.post('/optimizacion/osr/generar', r((req) => generarIngresoOsr(req.body || {})));
+app.post('/optimizacion/dispersion', r((req) => dispersionCds(req.body || {})));
+app.get('/optimizacion/dispersion/excel', r(async (req, res) => enviarXlsx(res, await archivoDispersionCds(req.query))));
 app.post('/optimizacion/consolidacion/simular', r((req) => consolidacionCds(req.body || {})));
 app.get('/optimizacion/consolidacion/excel', r(async (req, res) => enviarXlsx(res, await archivoConsolidacionCds(req.query))));
 app.post('/optimizacion/interna/simular', r((req) => consolidacionInterna(req.body || {})));
